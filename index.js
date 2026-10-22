@@ -3,7 +3,7 @@
 // Config loads dotenv internally
 const cfg = require("./config");
 const makeWASocket = require("@whiskeysockets/baileys").default;
-const { Browsers, makeCacheableSignalKeyStore, fetchLatestWaWebVersion } = require("@whiskeysockets/baileys");
+const { Browsers, makeCacheableSignalKeyStore, fetchLatestWaWebVersion, DisconnectReason } = require("@whiskeysockets/baileys");
 const { MongoClient } = require("mongodb");
 const { useMongoDBAuthState } = require("./lib/mongo-auth");
 const { fancy } = require("./lib/font");
@@ -24,7 +24,6 @@ global.mongoClient = null;
 let _mongoPromise = null;
 function initMongo() {
     _mongoPromise ??= (async () => {
-        // SAFETY CHECK: Catch undefined URI before MongoDB client crashes
         if (!cfg.mongo.uri || typeof cfg.mongo.uri !== "string") {
             console.error(`\n❌ CRITICAL ERROR: MONGODB_URI is missing or invalid in your .env file!`);
             console.error(`Please make sure your .env file exists in the project root and contains:\nMONGODB_URI=mongodb://...\n`);
@@ -41,16 +40,6 @@ function initMongo() {
 }
 
 // ============================================================
-//   PAIRING QUEUE
-// ============================================================
-let pairingQueue = Promise.resolve();
-function enqueuePairing(fn) {
-    const next = pairingQueue.then(fn, fn);
-    pairingQueue = next.catch(() => {});
-    return next;
-}
-
-// ============================================================
 //   SOCKET BOOT
 // ============================================================
 async function bootSocket(sessionId, session) {
@@ -59,12 +48,16 @@ async function bootSocket(sessionId, session) {
     const collection = await initMongo();
     const { state, saveCreds } = await useMongoDBAuthState(collection, sessionId);
 
-    let version = [2, 3000, 1023223821];
+    // --- Force latest WhatsApp Web version ---
+    let version;
     try {
         const v = await fetchLatestWaWebVersion();
-        if (v?.version) version = v.version;
-    } catch {}
-    console.log(`[${sessionId}] ${fancy("WA version")}: ${JSON.stringify(version)}`);
+        version = v.version;
+        console.log(`[${sessionId}] ${fancy("WA version")}: ${JSON.stringify(version)}`);
+    } catch (e) {
+        console.error(`[${sessionId}] Failed to fetch latest version:`, e.message);
+        throw new Error("Cannot fetch WA version");
+    }
 
     const conn = makeWASocket({
         version,
@@ -73,7 +66,8 @@ async function bootSocket(sessionId, session) {
             keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "silent" }))
         },
         logger: pino({ level: "silent" }),
-        browser: Browsers.macOS("Safari"),
+        // Using Ubuntu/Chrome for better server compatibility than macOS/Safari
+        browser: Browsers.ubuntu("Chrome"), 
         syncFullHistory: false,
         markOnlineOnConnect: false,
         generateHighQualityLinkPreview: false,
@@ -127,16 +121,24 @@ async function bootSocket(sessionId, session) {
             session.socketReady = false;
             session.pairing = null;
             session.pairingNumber = null;
+            
             const code = lastDisconnect?.error?.output?.statusCode;
-            console.log(`❌ [${sessionId}] ${fancy("closed")} (${code})`);
+            const reason = Object.keys(DisconnectReason).find(key => DisconnectReason[key] === code) || "unknown";
+            
+            console.log(`❌ [${sessionId}] ${fancy("closed")} (Code: ${code} - ${reason})`);
 
             if (session._paused) return;
-            if (code === 401) { await logoutSession(sessionId); return; }
-            if (code === 440) return;
+            if (code === DisconnectReason.loggedOut) { 
+                console.log(`[${sessionId}] Logged out. Clearing DB...`);
+                await logoutSession(sessionId); 
+                return; 
+            }
+            if (code === DisconnectReason.connectionReplaced) return;
 
             setTimeout(() => {
                 if (!global.sessions.has(sessionId)) return;
                 if (session._paused) return;
+                console.log(`🔄 [${sessionId}] Reconnecting...`);
                 bootSocket(sessionId, session).catch(e =>
                     console.error(`Reconnect ${sessionId}:`, e.message));
             }, 5000);
@@ -184,7 +186,8 @@ async function requestPairingCodeForSession(sessionId, phoneNumber) {
         let code;
         try {
             code = await session.conn.requestPairingCode(phoneNumber);
-        } catch {
+        } catch (e) {
+            console.log(`⚠️ First pairing attempt failed (${e.message}). Retrying...`);
             await new Promise(r => setTimeout(r, 2000));
             code = await session.conn.requestPairingCode(phoneNumber);
         }
