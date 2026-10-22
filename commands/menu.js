@@ -3,7 +3,7 @@
 module.exports = {
     name: "menu",
     help: "Show command menu",
-    run: async ({ conn, m, reply, cfg, commands }) => {
+    run: async ({ conn, m, reply, cfg, commands, fancy }) => {
         const groups = new Map();
         for (const c of commands.values()) {
             if (!groups.has(c.category)) groups.set(c.category, []);
@@ -12,20 +12,20 @@ module.exports = {
 
         let body = "";
         for (const [cat, list] of groups) {
-            body += `\n╭─「 *${cat.toUpperCase()}* 」─\n`;
+            body += `\n╭─「 *${fancy(cat)}* 」─\n`;
             for (const c of list.sort((a, b) => a.name.localeCompare(b.name))) {
-                body += `│ • ${cfg.prefix}${c.name}${c.help ? ` — ${c.help}` : ""}\n`;
+                body += `│ • ${cfg.prefix}${c.name}${c.help ? ` — ${fancy(c.help)}` : ""}\n`;
             }
             body += `╰──────────────────\n`;
         }
 
         await reply(conn, m,
-`╭─「 *${cfg.name}* — ${cfg.tagline} 」─╮
-│ Version : ${cfg.version}
-│ Prefix  : ${cfg.prefix}
-│ Owner   : ${cfg.owner.name}
+`╭─「 *${fancy(cfg.name)}* — ${fancy(cfg.tagline)} 」─╮
+│ ${fancy("Version")} : ${cfg.version}
+│ ${fancy("Prefix")}  : ${cfg.prefix}
+│ ${fancy("Owner")}   : ${fancy(cfg.owner.name)}
 ╰──────────────────────────╯
 ${body}
-📢 Channel : ${cfg.links.channel}`);
+📢 ${fancy("Channel")} : ${cfg.links.channel}`);
     }
 };
