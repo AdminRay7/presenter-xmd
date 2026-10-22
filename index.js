@@ -1,23 +1,44 @@
 "use strict";
-require("dotenv").config();
 
+// Config loads dotenv internally
+const cfg = require("./config");
 const makeWASocket = require("@whiskeysockets/baileys").default;
 const { Browsers, makeCacheableSignalKeyStore, fetchLatestWaWebVersion } = require("@whiskeysockets/baileys");
 const { MongoClient } = require("mongodb");
 const { useMongoDBAuthState } = require("./lib/mongo-auth");
+const { fancy } = require("./lib/font");
 const pino = require("pino");
 const http = require("http");
 const express = require("express");
 const path = require("path");
-
-const cfg = require("./config");
-const { fancy } = require("./lib/font");
 
 // ============================================================
 //   GLOBAL STATE
 // ============================================================
 global.sessions = new Map();
 global.mongoClient = null;
+
+// ============================================================
+//   MONGO (auth collection)
+// ============================================================
+let _mongoPromise = null;
+function initMongo() {
+    _mongoPromise ??= (async () => {
+        // SAFETY CHECK: Catch undefined URI before MongoDB client crashes
+        if (!cfg.mongo.uri || typeof cfg.mongo.uri !== "string") {
+            console.error(`\n❌ CRITICAL ERROR: MONGODB_URI is missing or invalid in your .env file!`);
+            console.error(`Please make sure your .env file exists in the project root and contains:\nMONGODB_URI=mongodb://...\n`);
+            process.exit(1);
+        }
+
+        const client = new MongoClient(cfg.mongo.uri);
+        await client.connect();
+        global.mongoClient = client;
+        console.log(`✅ MongoDB (${fancy("auth")}) connected`);
+        return client.db(cfg.mongo.db).collection(cfg.mongo.authCollection);
+    })();
+    return _mongoPromise;
+}
 
 // ============================================================
 //   PAIRING QUEUE
@@ -27,21 +48,6 @@ function enqueuePairing(fn) {
     const next = pairingQueue.then(fn, fn);
     pairingQueue = next.catch(() => {});
     return next;
-}
-
-// ============================================================
-//   MONGO (auth collection)
-// ============================================================
-let _mongoPromise = null;
-function initMongo() {
-    _mongoPromise ??= (async () => {
-        const client = new MongoClient(cfg.mongo.uri);
-        await client.connect();
-        global.mongoClient = client;
-        console.log(`✅ MongoDB (${fancy("auth")}) connected`);
-        return client.db(cfg.mongo.db).collection(cfg.mongo.authCollection);
-    })();
-    return _mongoPromise;
 }
 
 // ============================================================
@@ -237,9 +243,11 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-app.get("/health", (_req, res) => {
+app.get("/health", async (_req, res) => {
+    const { ping } = require("./database/models");
     res.json({
         ok: true,
+        db: await ping(),
         bot: cfg.name,
         tagline: cfg.tagline,
         version: cfg.version,
