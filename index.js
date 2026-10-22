@@ -10,7 +10,8 @@ const http = require("http");
 const express = require("express");
 const path = require("path");
 
-const cfg = require("./lib/config");
+const cfg = require("./config");
+const { fancy } = require("./lib/font");
 
 // ============================================================
 //   GLOBAL STATE
@@ -37,7 +38,7 @@ function initMongo() {
         const client = new MongoClient(cfg.mongo.uri);
         await client.connect();
         global.mongoClient = client;
-        console.log("✅ MongoDB (auth) connected");
+        console.log(`✅ MongoDB (${fancy("auth")}) connected`);
         return client.db(cfg.mongo.db).collection(cfg.mongo.authCollection);
     })();
     return _mongoPromise;
@@ -57,7 +58,7 @@ async function bootSocket(sessionId, session) {
         const v = await fetchLatestWaWebVersion();
         if (v?.version) version = v.version;
     } catch {}
-    console.log(`[${sessionId}] WA version: ${JSON.stringify(version)}`);
+    console.log(`[${sessionId}] ${fancy("WA version")}: ${JSON.stringify(version)}`);
 
     const conn = makeWASocket({
         version,
@@ -86,14 +87,14 @@ async function bootSocket(sessionId, session) {
 
         if (connection === "connecting") {
             session.socketReady = true;
-            console.log(`🔌 [${sessionId}] socket ready`);
+            console.log(`🔌 [${sessionId}] ${fancy("socket ready")}`);
         }
 
         if (connection === "open") {
             session.socketReady = true;
             session.pairing = null;
             session.pairingNumber = null;
-            console.log(`✅ [${sessionId}] connected as ${conn.user?.id}`);
+            console.log(`✅ [${sessionId}] ${fancy("connected as")} ${conn.user?.id}`);
 
             try {
                 await collection.updateOne(
@@ -113,7 +114,7 @@ async function bootSocket(sessionId, session) {
                         { upsert: true }
                     );
                 }
-            } catch (e) { console.error(`[${sessionId}] phone save error:`, e.message); }
+            } catch (e) { console.error(`[${sessionId}] ${fancy("phone save error")}:`, e.message); }
         }
 
         if (connection === "close") {
@@ -121,7 +122,7 @@ async function bootSocket(sessionId, session) {
             session.pairing = null;
             session.pairingNumber = null;
             const code = lastDisconnect?.error?.output?.statusCode;
-            console.log(`❌ [${sessionId}] closed (${code})`);
+            console.log(`❌ [${sessionId}] ${fancy("closed")} (${code})`);
 
             if (session._paused) return;
             if (code === 401) { await logoutSession(sessionId); return; }
@@ -185,7 +186,7 @@ async function requestPairingCodeForSession(sessionId, phoneNumber) {
         const formatted = code.match(/.{1,4}/g)?.join("-") || code;
         session.pairing = formatted;
         session.pairingNumber = phoneNumber;
-        console.log(`✅ [${sessionId}] pairing code: ${formatted}`);
+        console.log(`✅ [${sessionId}] ${fancy("pairing code")}: ${formatted}`);
         return formatted;
     });
 }
@@ -211,7 +212,7 @@ async function logoutSession(sessionId) {
 async function resumeAllSessions() {
     const collection = await initMongo();
     const metas = await collection.find({ _id: { $regex: ":meta$" } }).toArray();
-    console.log(`🔄 Resuming ${metas.length} session(s)...`);
+    console.log(`🔄 ${fancy("Resuming")} ${metas.length} ${fancy("session(s)")}...`);
 
     for (const meta of metas) {
         const sessionId = meta._id.replace(/:meta$/, "");
@@ -240,6 +241,7 @@ app.get("/health", (_req, res) => {
     res.json({
         ok: true,
         bot: cfg.name,
+        tagline: cfg.tagline,
         version: cfg.version,
         sessions: global.sessions.size,
         uptime: process.uptime()
@@ -281,7 +283,7 @@ app.post("/logout/:sessionId", async (req, res) => {
 //   GRACEFUL SHUTDOWN
 // ============================================================
 async function shutdown() {
-    console.log("🛑 Shutting down...");
+    console.log(`🛑 ${fancy("Shutting down")}...`);
     for (const s of global.sessions.values()) {
         try { s.conn?.ws?.close(); } catch {}
     }
@@ -300,8 +302,8 @@ process.on("SIGINT", shutdown);
     await resumeAllSessions();
 
     http.createServer(app).listen(cfg.server.port, () => {
-        console.log(`🌐 Dashboard: http://localhost:${cfg.server.port}`);
-        console.log(`🤖 ${cfg.name} v${cfg.version} — ${cfg.tagline}`);
+        console.log(`🌐 ${fancy("Dashboard")}: http://localhost:${cfg.server.port}`);
+        console.log(`🤖 ${fancy(cfg.name)} v${cfg.version} — ${fancy(cfg.tagline)}`);
     });
 })();
 
