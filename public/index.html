@@ -2,166 +2,211 @@
 <html lang="en">
 <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>303-XMD — The Last Key</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>303-XMD | Pair Device</title>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg: #f3f4f6;
+            --card: #ffffff;
+            --text: #1f2937;
+            --text-muted: #6b7280;
+            --primary: #10b981;
+            --primary-hover: #059669;
+            --border: #e5e7eb;
+            --error: #ef4444;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: #0b0d10;
-            color: #e6edf3;
+            background-color: var(--bg);
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            justify-content: center;
             min-height: 100vh;
-            padding: 32px 16px;
-        }
-        .wrap { max-width: 780px; margin: 0 auto; }
-        h1 { font-size: 28px; letter-spacing: .5px; }
-        .tag { color: #7d8590; margin-top: 4px; margin-bottom: 24px; }
-        .card {
-            background: #161b22;
-            border: 1px solid #21262d;
-            border-radius: 12px;
             padding: 20px;
-            margin-bottom: 16px;
         }
-        .row { display: flex; gap: 12px; flex-wrap: wrap; }
-        input {
-            flex: 1 1 180px;
-            background: #0d1117;
-            border: 1px solid #30363d;
-            color: #e6edf3;
-            padding: 10px 12px;
-            border-radius: 8px;
-            font-size: 14px;
-        }
-        button {
-            background: #238636;
-            color: #fff;
-            border: 0;
-            padding: 10px 18px;
-            border-radius: 8px;
-            font-size: 14px;
-            cursor: pointer;
-            font-weight: 600;
-        }
-        button:hover { background: #2ea043; }
-        button.ghost { background: #21262d; }
-        button.ghost:hover { background: #30363d; }
-        .code {
-            font-family: ui-monospace, Menlo, monospace;
-            font-size: 22px;
-            letter-spacing: 3px;
-            color: #58a6ff;
-            margin-top: 12px;
-            padding: 12px;
-            background: #0d1117;
-            border: 1px solid #30363d;
-            border-radius: 8px;
+
+        .card {
+            background: var(--card);
+            width: 100%;
+            max-width: 400px;
+            border-radius: 20px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+            padding: 40px 30px;
             text-align: center;
         }
-        .session {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px;
-            border-bottom: 1px solid #21262d;
+
+        .logo {
+            font-size: 40px;
+            margin-bottom: 10px;
         }
-        .session:last-child { border-bottom: 0; }
-        .badge {
-            font-size: 11px;
-            padding: 3px 8px;
-            border-radius: 99px;
-            background: #21262d;
-            color: #7d8590;
-            margin-left: 8px;
+
+        h1 {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: var(--text);
         }
-        .badge.on { background: #1f6feb33; color: #58a6ff; }
-        .err { color: #f85149; margin-top: 8px; font-size: 13px; }
-        .muted { color: #7d8590; font-size: 13px; }
-        a { color: #58a6ff; }
+
+        p.subtitle {
+            font-size: 14px;
+            color: var(--text-muted);
+            margin-bottom: 30px;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+            text-align: left;
+        }
+
+        .input-group label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--text-muted);
+        }
+
+        input {
+            width: 100%;
+            padding: 14px 16px;
+            font-size: 16px;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            background: #f9fafb;
+        }
+
+        input:focus {
+            border-color: var(--primary);
+            background: #ffffff;
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+        }
+
+        button {
+            width: 100%;
+            padding: 14px;
+            font-size: 16px;
+            font-weight: 600;
+            color: white;
+            background: var(--primary);
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.1s;
+        }
+
+        button:hover { background: var(--primary-hover); }
+        button:active { transform: scale(0.98); }
+        button:disabled { opacity: 0.7; cursor: not-allowed; }
+
+        .code-box {
+            display: none;
+            margin-top: 25px;
+            padding: 20px;
+            background: #ecfdf5;
+            border: 1px dashed var(--primary);
+            border-radius: 12px;
+        }
+
+        .code-label {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+
+        .code-value {
+            font-size: 28px;
+            font-weight: 800;
+            color: var(--primary-hover);
+            letter-spacing: 4px;
+            font-family: monospace;
+        }
+
+        .error {
+            color: var(--error);
+            font-size: 14px;
+            margin-top: 15px;
+            display: none;
+            background: #fef2f2;
+            padding: 10px;
+            border-radius: 8px;
+        }
     </style>
 </head>
 <body>
-    <div class="wrap">
-        <h1>🤖 303-XMD</h1>
-        <div class="tag">The Last Key · v2.0.0</div>
 
-        <div class="card">
-            <h3 style="margin-bottom:12px">Pair a session</h3>
-            <div class="row">
-                <input id="sid" placeholder="session id (e.g. main)" />
-                <input id="phone" placeholder="phone (254794376595)" />
-                <button onclick="pair()">Get code</button>
-            </div>
-            <div id="codeBox" class="code" style="display:none"></div>
-            <div id="err" class="err"></div>
+    <div class="card">
+        <div class="logo">🤖</div>
+        <h1>303-XMD</h1>
+        <p class="subtitle">Enter your WhatsApp number to link</p>
+
+        <div class="input-group">
+            <label>Phone Number</label>
+            <input id="phone" type="tel" placeholder="e.g. 254794376595" autocomplete="off" />
         </div>
 
-        <div class="card">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-                <h3>Sessions</h3>
-                <button class="ghost" onclick="load()">Refresh</button>
-            </div>
-            <div id="sessions"><div class="muted">Loading…</div></div>
+        <button id="btn" onclick="pair()">Get Pairing Code</button>
+
+        <div id="codeBox" class="code-box">
+            <div class="code-label">Your Pairing Code</div>
+            <div id="codeValue" class="code-value">----</div>
         </div>
 
-        <div class="card">
-            <h3 style="margin-bottom:8px">Channel</h3>
-            <p class="muted">📢 <a href="https://whatsapp.com/channel/0029VbDUltrC6Zve91V0GW1u">WhatsApp Channel</a></p>
-        </div>
+        <div id="err" class="error"></div>
     </div>
 
 <script>
 async function pair() {
-    document.getElementById("err").textContent = "";
-    const sid = document.getElementById("sid").value.trim();
+    const btn = document.getElementById("btn");
     const phone = document.getElementById("phone").value.trim();
-    if (!sid || !phone) return document.getElementById("err").textContent = "Both fields required";
+    const err = document.getElementById("err");
+    const codeBox = document.getElementById("codeBox");
+    const codeValue = document.getElementById("codeValue");
+
+    // Reset UI
+    err.style.display = "none";
+    codeBox.style.display = "none";
+
+    if (!phone) {
+        err.textContent = "Please enter your phone number.";
+        err.style.display = "block";
+        return;
+    }
+
+    // Disable button while loading
+    btn.disabled = true;
+    btn.textContent = "Generating...";
+
     try {
+        // Automatically generates a random session ID in the background
+        const sessionId = "sess_" + Math.random().toString(36).substring(2, 15);
+
         const r = await fetch("/pair", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sessionId: sid, phone })
+            body: JSON.stringify({ sessionId, phone })
         });
+        
         const j = await r.json();
-        if (!r.ok) throw new Error(j.error || "Failed");
-        const box = document.getElementById("codeBox");
-        box.style.display = "block";
-        box.textContent = j.code;
-        load();
+        
+        if (!r.ok) throw new Error(j.error || "Failed to generate code");
+
+        // Show code
+        codeValue.textContent = j.code;
+        codeBox.style.display = "block";
+        btn.textContent = "Code Generated ✓";
+        
     } catch (e) {
-        document.getElementById("err").textContent = e.message;
+        err.textContent = e.message;
+        err.style.display = "block";
+        btn.textContent = "Get Pairing Code";
+        btn.disabled = false;
     }
 }
-
-async function logout(id) {
-    await fetch("/logout/" + encodeURIComponent(id), { method: "POST" });
-    load();
-}
-
-async function load() {
-    try {
-        const r = await fetch("/sessions");
-        const list = await r.json();
-        const el = document.getElementById("sessions");
-        if (!list.length) { el.innerHTML = '<div class="muted">No sessions yet.</div>'; return; }
-        el.innerHTML = list.map(s => `
-            <div class="session">
-                <div>
-                    <strong>${s.id}</strong>
-                    <span class="badge ${s.paired ? 'on' : ''}">${s.paired ? 'connected' : 'pending'}</span>
-                    ${s.jid ? `<div class="muted">${s.jid}</div>` : ''}
-                </div>
-                <button class="ghost" onclick="logout('${s.id}')">Logout</button>
-            </div>
-        `).join("");
-    } catch (e) {
-        document.getElementById("sessions").innerHTML =
-            `<div class="err">${e.message}</div>`;
-    }
-}
-
-load();
-setInterval(load, 5000);
 </script>
 </body>
 </html>
