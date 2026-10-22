@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>303-XMD — The Last Key</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #0b0d10;
+            color: #e6edf3;
+            min-height: 100vh;
+            padding: 32px 16px;
+        }
+        .wrap { max-width: 780px; margin: 0 auto; }
+        h1 { font-size: 28px; letter-spacing: .5px; }
+        .tag { color: #7d8590; margin-top: 4px; margin-bottom: 24px; }
+        .card {
+            background: #161b22;
+            border: 1px solid #21262d;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+        .row { display: flex; gap: 12px; flex-wrap: wrap; }
+        input {
+            flex: 1 1 180px;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            color: #e6edf3;
+            padding: 10px 12px;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        button {
+            background: #238636;
+            color: #fff;
+            border: 0;
+            padding: 10px 18px;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        button:hover { background: #2ea043; }
+        button.ghost { background: #21262d; }
+        button.ghost:hover { background: #30363d; }
+        .code {
+            font-family: ui-monospace, Menlo, monospace;
+            font-size: 22px;
+            letter-spacing: 3px;
+            color: #58a6ff;
+            margin-top: 12px;
+            padding: 12px;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .session {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            border-bottom: 1px solid #21262d;
+        }
+        .session:last-child { border-bottom: 0; }
+        .badge {
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 99px;
+            background: #21262d;
+            color: #7d8590;
+            margin-left: 8px;
+        }
+        .badge.on { background: #1f6feb33; color: #58a6ff; }
+        .err { color: #f85149; margin-top: 8px; font-size: 13px; }
+        .muted { color: #7d8590; font-size: 13px; }
+        a { color: #58a6ff; }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <h1>🤖 303-XMD</h1>
+        <div class="tag">The Last Key · v2.0.0</div>
+
+        <div class="card">
+            <h3 style="margin-bottom:12px">Pair a session</h3>
+            <div class="row">
+                <input id="sid" placeholder="session id (e.g. main)" />
+                <input id="phone" placeholder="phone (254794376595)" />
+                <button onclick="pair()">Get code</button>
+            </div>
+            <div id="codeBox" class="code" style="display:none"></div>
+            <div id="err" class="err"></div>
+        </div>
+
+        <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <h3>Sessions</h3>
+                <button class="ghost" onclick="load()">Refresh</button>
+            </div>
+            <div id="sessions"><div class="muted">Loading…</div></div>
+        </div>
+
+        <div class="card">
+            <h3 style="margin-bottom:8px">Channel</h3>
+            <p class="muted">📢 <a href="https://whatsapp.com/channel/0029VbDUltrC6Zve91V0GW1u">WhatsApp Channel</a></p>
+        </div>
+    </div>
+
+<script>
+async function pair() {
+    document.getElementById("err").textContent = "";
+    const sid = document.getElementById("sid").value.trim();
+    const phone = document.getElementById("phone").value.trim();
+    if (!sid || !phone) return document.getElementById("err").textContent = "Both fields required";
+    try {
+        const r = await fetch("/pair", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sessionId: sid, phone })
+        });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || "Failed");
+        const box = document.getElementById("codeBox");
+        box.style.display = "block";
+        box.textContent = j.code;
+        load();
+    } catch (e) {
+        document.getElementById("err").textContent = e.message;
+    }
+}
+
+async function logout(id) {
+    await fetch("/logout/" + encodeURIComponent(id), { method: "POST" });
+    load();
+}
+
+async function load() {
+    try {
+        const r = await fetch("/sessions");
+        const list = await r.json();
+        const el = document.getElementById("sessions");
+        if (!list.length) { el.innerHTML = '<div class="muted">No sessions yet.</div>'; return; }
+        el.innerHTML = list.map(s => `
+            <div class="session">
+                <div>
+                    <strong>${s.id}</strong>
+                    <span class="badge ${s.paired ? 'on' : ''}">${s.paired ? 'connected' : 'pending'}</span>
+                    ${s.jid ? `<div class="muted">${s.jid}</div>` : ''}
+                </div>
+                <button class="ghost" onclick="logout('${s.id}')">Logout</button>
+            </div>
+        `).join("");
+    } catch (e) {
+        document.getElementById("sessions").innerHTML =
+            `<div class="err">${e.message}</div>`;
+    }
+}
+
+load();
+setInterval(load, 5000);
+</script>
+</body>
+</html>
