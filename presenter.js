@@ -2,13 +2,15 @@
 
 const fs = require("fs");
 const path = require("path");
-const cfg = require("./lib/config");
+const cfg = require("./config");
+const { fancy } = require("./lib/font");
 const { jidNormalizedUser } = require("@whiskeysockets/baileys");
 
 // ============================================================
-//   SHARED HELPERS (available to every command)
+//   SHARED HELPERS
 // ============================================================
 const helpers = {
+    fancy,
     isOwner: (jid) => jidNormalizedUser(jid || "").startsWith(cfg.owner.number),
 
     reply: (conn, m, text) =>
@@ -101,7 +103,7 @@ module.exports = async function handler(conn, m, sessionId) {
         if (!found) return;
 
         if (found.owner && !helpers.isOwner(m.key.participant || m.key.remoteJid)) {
-            return helpers.reply(conn, m, "❌ Owner only.");
+            return helpers.reply(conn, m, "❌ " + fancy("owner") + " only.");
         }
 
         const ctx = { conn, m, args, text, sessionId, cfg, commands, ...helpers };
