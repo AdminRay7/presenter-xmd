@@ -1,6 +1,7 @@
 "use strict";
 
-// Config loads dotenv internally
+// Load config and dependencies
+require("dotenv").config();
 const cfg = require("./config");
 const makeWASocket = require("@whiskeysockets/baileys").default;
 const { Browsers, makeCacheableSignalKeyStore, fetchLatestWaWebVersion, DisconnectReason } = require("@whiskeysockets/baileys");
@@ -34,12 +35,7 @@ function enqueuePairing(fn) {
 let _mongoPromise = null;
 function initMongo() {
     _mongoPromise ??= (async () => {
-        if (!cfg.mongo.uri || typeof cfg.mongo.uri !== "string") {
-            console.error(`\n❌ CRITICAL ERROR: MONGODB_URI is missing or invalid in your .env file!`);
-            console.error(`Please make sure your .env file exists in the project root and contains:\nMONGODB_URI=mongodb://...\n`);
-            process.exit(1);
-        }
-
+        if (!cfg.mongo.uri) throw new Error("MONGODB_URI missing");
         const client = new MongoClient(cfg.mongo.uri);
         await client.connect();
         global.mongoClient = client;
@@ -50,22 +46,22 @@ function initMongo() {
 }
 
 // ============================================================
-//   SOCKET BOOT
+//   SOCKET BOOT (Using exact logic from working bot)
 // ============================================================
 async function bootSocket(sessionId, session) {
     session.id = sessionId;
 
     const collection = await initMongo();
     const { state, saveCreds } = await useMongoDBAuthState(collection, sessionId);
-
-    // --- Force latest WhatsApp Web version ---
+    
+    // Fetch version exactly like the working bot
     let version;
     try {
         const v = await fetchLatestWaWebVersion();
         version = v.version;
         console.log(`[${sessionId}] ${fancy("WA version")}: ${JSON.stringify(version)}`);
     } catch (e) {
-        console.error(`[${sessionId}] Failed to fetch latest version:`, e.message);
+        console.error(`[${sessionId}] Failed to fetch version:`, e.message);
         throw new Error("Cannot fetch WA version");
     }
 
@@ -76,8 +72,8 @@ async function bootSocket(sessionId, session) {
             keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "silent" }))
         },
         logger: pino({ level: "silent" }),
-        // Ubuntu/Chrome is better for cloud hosting like Heroku
-        browser: Browsers.ubuntu("Chrome"), 
+        // REVERTED TO SAFARI: The working bot uses Safari, which WhatsApp trusts more
+        browser: Browsers.macOS("Safari"), 
         syncFullHistory: false,
         markOnlineOnConnect: false,
         generateHighQualityLinkPreview: false,
@@ -113,18 +109,6 @@ async function bootSocket(sessionId, session) {
                     { upsert: true }
                 );
             } catch {}
-
-            try {
-                const { SessionSettings } = require("./database/models");
-                const realPhone = conn.user?.id?.split(":")[0]?.split("@")[0] || null;
-                if (realPhone) {
-                    await SessionSettings.updateOne(
-                        { sessionId },
-                        { $set: { phoneNumber: realPhone, jid: conn.user?.id, updatedAt: Date.now() } },
-                        { upsert: true }
-                    );
-                }
-            } catch (e) { console.error(`[${sessionId}] ${fancy("phone save error")}:`, e.message); }
         }
 
         if (connection === "close") {
@@ -133,24 +117,19 @@ async function bootSocket(sessionId, session) {
             session.pairingNumber = null;
             
             const code = lastDisconnect?.error?.output?.statusCode;
-            const reason = Object.keys(DisconnectReason).find(key => DisconnectReason[key] === code) || "unknown";
-            
-            console.log(`❌ [${sessionId}] ${fancy("closed")} (Code: ${code} - ${reason})`);
+            console.log(`❌ [${sessionId}] ${fancy("closed")} (Code: ${code})`);
 
             if (session._paused) return;
-            if (code === DisconnectReason.loggedOut) { 
-                console.log(`[${sessionId}] Logged out. Clearing DB...`);
+            if (code === 401 || code === DisconnectReason.loggedOut) { 
                 await logoutSession(sessionId); 
                 return; 
             }
-            if (code === DisconnectReason.connectionReplaced) return;
+            if (code === 440) return;
 
             setTimeout(() => {
                 if (!global.sessions.has(sessionId)) return;
                 if (session._paused) return;
-                console.log(`🔄 [${sessionId}] Reconnecting...`);
-                bootSocket(sessionId, session).catch(e =>
-                    console.error(`Reconnect ${sessionId}:`, e.message));
+                bootSocket(sessionId, session).catch(e => console.error(`Reconnect ${sessionId}:`, e.message));
             }, 5000);
         }
     });
@@ -173,12 +152,8 @@ async function requestPairingCodeForSession(sessionId, phoneNumber) {
 
         let session = global.sessions.get(sessionId);
         if (session?.conn?.user) throw new Error("Session already paired");
-        if (session?.pairing && session.pairingNumber === phoneNumber) return session.pairing;
 
         if (!session) {
-            if (global.sessions.size >= cfg.server.maxSessions) {
-                throw new Error(`Server at capacity (${cfg.server.maxSessions})`);
-            }
             session = {
                 conn: null, socketReady: false, pairing: null, pairingNumber: null,
                 startedAt: Date.now(), welcomed: false
@@ -187,6 +162,7 @@ async function requestPairingCodeForSession(sessionId, phoneNumber) {
             await bootSocket(sessionId, session);
         }
 
+        // Wait for socket to be ready before pairing
         const deadline = Date.now() + 30000;
         while (!session.socketReady && Date.now() < deadline) {
             await new Promise(r => setTimeout(r, 500));
@@ -197,7 +173,6 @@ async function requestPairingCodeForSession(sessionId, phoneNumber) {
         try {
             code = await session.conn.requestPairingCode(phoneNumber);
         } catch (e) {
-            console.log(`⚠️ First pairing attempt failed (${e.message}). Retrying...`);
             await new Promise(r => setTimeout(r, 2000));
             code = await session.conn.requestPairingCode(phoneNumber);
         }
@@ -205,13 +180,24 @@ async function requestPairingCodeForSession(sessionId, phoneNumber) {
         const formatted = code.match(/.{1,4}/g)?.join("-") || code;
         session.pairing = formatted;
         session.pairingNumber = phoneNumber;
+        
+        // Write to session_settings so it shows up in MongoDB
+        try {
+            const { SessionSettings } = require("./database/models");
+            await SessionSettings.updateOne(
+                { sessionId },
+                { $set: { phoneNumber, updatedAt: Date.now() } },
+                { upsert: true }
+            );
+        } catch (e) {}
+
         console.log(`✅ [${sessionId}] ${fancy("pairing code")}: ${formatted}`);
         return formatted;
     });
 }
 
 // ============================================================
-//   LOGOUT
+//   LOGOUT & RESUME
 // ============================================================
 async function logoutSession(sessionId) {
     const s = global.sessions.get(sessionId);
@@ -225,28 +211,26 @@ async function logoutSession(sessionId) {
     } catch {}
 }
 
-// ============================================================
-//   RESUME
-// ============================================================
 async function resumeAllSessions() {
-    const collection = await initMongo();
-    const metas = await collection.find({ _id: { $regex: ":meta$" } }).toArray();
-    console.log(`🔄 ${fancy("Resuming")} ${metas.length} ${fancy("session(s)")}...`);
+    try {
+        const collection = await initMongo();
+        const metas = await collection.find({ _id: { $regex: ":meta$" } }).toArray();
+        console.log(`🔄 ${fancy("Resuming")} ${metas.length} ${fancy("session(s)")}...`);
 
-    for (const meta of metas) {
-        const sessionId = meta._id.replace(/:meta$/, "");
-        if (global.sessions.has(sessionId)) continue;
-        if (global.sessions.size >= cfg.server.maxSessions) break;
-
-        const session = {
-            conn: null, socketReady: false, pairing: null, pairingNumber: null,
-            startedAt: Date.now(), welcomed: false
-        };
-        global.sessions.set(sessionId, session);
-        try { await bootSocket(sessionId, session); }
-        catch (e) { console.error(`Resume ${sessionId}:`, e.message); }
-        await new Promise(r => setTimeout(r, 1500));
-    }
+        for (const meta of metas) {
+            const sessionId = meta._id.replace(/:meta$/, "");
+            if (global.sessions.has(sessionId)) continue;
+            
+            const session = {
+                conn: null, socketReady: false, pairing: null, pairingNumber: null,
+                startedAt: Date.now(), welcomed: false
+            };
+            global.sessions.set(sessionId, session);
+            try { await bootSocket(sessionId, session); }
+            catch (e) { console.error(`Resume ${sessionId}:`, e.message); }
+            await new Promise(r => setTimeout(r, 1500));
+        }
+    } catch (e) { console.error("Resume error:", e.message); }
 }
 
 // ============================================================
@@ -255,30 +239,6 @@ async function resumeAllSessions() {
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
-
-app.get("/health", async (_req, res) => {
-    const { ping } = require("./database/models");
-    res.json({
-        ok: true,
-        db: await ping(),
-        bot: cfg.name,
-        tagline: cfg.tagline,
-        version: cfg.version,
-        sessions: global.sessions.size,
-        uptime: process.uptime()
-    });
-});
-
-app.get("/sessions", (_req, res) => {
-    const list = [...global.sessions.entries()].map(([id, s]) => ({
-        id,
-        paired: !!s.conn?.user,
-        jid: s.conn?.user?.id || null,
-        pairing: s.pairing || null,
-        startedAt: s.startedAt
-    }));
-    res.json(list);
-});
 
 app.post("/pair", async (req, res) => {
     try {
@@ -291,29 +251,12 @@ app.post("/pair", async (req, res) => {
     }
 });
 
-app.post("/logout/:sessionId", async (req, res) => {
-    try {
-        await logoutSession(req.params.sessionId);
-        res.json({ ok: true });
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
+app.get("/api/status", (req, res) => {
+    const list = [...global.sessions.entries()].map(([id, s]) => ({
+        id, paired: !!s.conn?.user, jid: s.conn?.user?.id || null
+    }));
+    res.json({ ok: true, sessions: list });
 });
-
-// ============================================================
-//   GRACEFUL SHUTDOWN
-// ============================================================
-async function shutdown() {
-    console.log(`🛑 ${fancy("Shutting down")}...`);
-    for (const s of global.sessions.values()) {
-        try { s.conn?.ws?.close(); } catch {}
-    }
-    try { await global.mongoClient?.close(); } catch {}
-    try { await require("./database/models").closeDB(); } catch {}
-    process.exit(0);
-}
-process.on("SIGTERM", shutdown);
-process.on("SIGINT", shutdown);
 
 // ============================================================
 //   BOOT
@@ -327,14 +270,3 @@ process.on("SIGINT", shutdown);
         console.log(`🤖 ${fancy(cfg.name)} v${cfg.version} — ${fancy(cfg.tagline)}`);
     });
 })();
-
-// ============================================================
-//   EXPORTS
-// ============================================================
-module.exports = {
-    bootSocket,
-    requestPairingCodeForSession,
-    logoutSession,
-    resumeAllSessions,
-    initMongo
-};
