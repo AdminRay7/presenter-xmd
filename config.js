@@ -1,5 +1,8 @@
 "use strict";
-require("dotenv").config();
+
+const path = require("path");
+// Force dotenv to load from the exact directory of config.js
+require("dotenv").config({ path: path.resolve(__dirname, ".env") });
 
 const { fancy } = require("./lib/font");
 
