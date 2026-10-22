@@ -19,6 +19,16 @@ global.sessions = new Map();
 global.mongoClient = null;
 
 // ============================================================
+//   PAIRING QUEUE
+// ============================================================
+let pairingQueue = Promise.resolve();
+function enqueuePairing(fn) {
+    const next = pairingQueue.then(fn, fn);
+    pairingQueue = next.catch(() => {});
+    return next;
+}
+
+// ============================================================
 //   MONGO (auth collection)
 // ============================================================
 let _mongoPromise = null;
@@ -66,7 +76,7 @@ async function bootSocket(sessionId, session) {
             keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "silent" }))
         },
         logger: pino({ level: "silent" }),
-        // Using Ubuntu/Chrome for better server compatibility than macOS/Safari
+        // Ubuntu/Chrome is better for cloud hosting like Heroku
         browser: Browsers.ubuntu("Chrome"), 
         syncFullHistory: false,
         markOnlineOnConnect: false,
