@@ -1,6 +1,5 @@
 "use strict";
 
-// Load config and dependencies
 require("dotenv").config();
 const cfg = require("./config");
 const makeWASocket = require("@whiskeysockets/baileys").default;
@@ -8,10 +7,23 @@ const { Browsers, makeCacheableSignalKeyStore, fetchLatestWaWebVersion, Disconne
 const { MongoClient } = require("mongodb");
 const { useMongoDBAuthState } = require("./lib/mongo-auth");
 const { fancy } = require("./lib/font");
+const { HttpsProxyAgent } = require("https-proxy-agent"); // Added for IP bypass
 const pino = require("pino");
 const http = require("http");
 const express = require("express");
 const path = require("path");
+
+// ============================================================
+//   PROXY CONFIG (OPTIONAL)
+// ============================================================
+// If Heroku's IP is blocked, paste your residential proxy here:
+// Example: 'http://username:password@proxy-ip:port'
+const PROXY_URL = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || ""; 
+let proxyAgent = null;
+if (PROXY_URL) {
+    proxyAgent = new HttpsProxyAgent(PROXY_URL);
+    console.log(`🌐 Using Proxy: ${PROXY_URL.replace(/\/\/.*@/, "//***@")}`); // Hides password in logs
+}
 
 // ============================================================
 //   GLOBAL STATE
@@ -46,7 +58,7 @@ function initMongo() {
 }
 
 // ============================================================
-//   SOCKET BOOT (Using exact logic from working bot)
+//   SOCKET BOOT
 // ============================================================
 async function bootSocket(sessionId, session) {
     session.id = sessionId;
@@ -54,7 +66,6 @@ async function bootSocket(sessionId, session) {
     const collection = await initMongo();
     const { state, saveCreds } = await useMongoDBAuthState(collection, sessionId);
     
-    // Fetch version exactly like the working bot
     let version;
     try {
         const v = await fetchLatestWaWebVersion();
@@ -72,8 +83,13 @@ async function bootSocket(sessionId, session) {
             keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "silent" }))
         },
         logger: pino({ level: "silent" }),
-        // REVERTED TO SAFARI: The working bot uses Safari, which WhatsApp trusts more
-        browser: Browsers.macOS("Safari"), 
+        
+        // FIX 1: Use Ubuntu (Web Browser) instead of MacOS (Desktop)
+        browser: Browsers.ubuntu("Chrome"), 
+        
+        // FIX 2: Apply Proxy Agent if URL is provided
+        agent: proxyAgent, 
+
         syncFullHistory: false,
         markOnlineOnConnect: false,
         generateHighQualityLinkPreview: false,
@@ -162,12 +178,15 @@ async function requestPairingCodeForSession(sessionId, phoneNumber) {
             await bootSocket(sessionId, session);
         }
 
-        // Wait for socket to be ready before pairing
+        // Wait for socket to be ready
         const deadline = Date.now() + 30000;
         while (!session.socketReady && Date.now() < deadline) {
             await new Promise(r => setTimeout(r, 500));
         }
         if (!session.socketReady) throw new Error("Socket not ready, try again");
+
+        // Give WhatsApp time to fully initialize the socket before asking for code
+        await new Promise(r => setTimeout(r, 2000));
 
         let code;
         try {
@@ -181,7 +200,6 @@ async function requestPairingCodeForSession(sessionId, phoneNumber) {
         session.pairing = formatted;
         session.pairingNumber = phoneNumber;
         
-        // Write to session_settings so it shows up in MongoDB
         try {
             const { SessionSettings } = require("./database/models");
             await SessionSettings.updateOne(
