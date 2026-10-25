@@ -1,212 +1,334 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-    <title>303-XMD | Pair Device</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>303-XMD | Link Device</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg: #f3f4f6;
-            --card: #ffffff;
-            --text: #1f2937;
-            --text-muted: #6b7280;
-            --primary: #10b981;
-            --primary-hover: #059669;
-            --border: #e5e7eb;
-            --error: #ef4444;
+            --primary-pink: #ff758c;
+            --hover-pink: #ff7eb3;
+            --bg-pink: #fff0f5;
+            --text-dark: #4a4a4a;
+            --error-red: #ff4d4d;
+            --success-green: #2ecc71;
         }
 
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Poppins', sans-serif;
+        }
 
         body {
-            background-color: var(--bg);
-            color: var(--text);
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            background: linear-gradient(135deg, #ffe6f0 0%, #fff5f8 100%);
             min-height: 100vh;
-            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden; /* Hide overflowing petals */
+            position: relative;
         }
 
-        .card {
-            background: var(--card);
+        /* --- Floating Flowers Background --- */
+        .flowers-container {
+            position: absolute;
+            top: 0;
+            left: 0;
             width: 100%;
-            max-width: 400px;
-            border-radius: 20px;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .flower {
+            position: absolute;
+            background-color: #ffb6c1;
+            border-radius: 50% 0 50% 0;
+            opacity: 0.6;
+            animation: float linear infinite;
+            box-shadow: 0 0 10px rgba(255, 182, 193, 0.5);
+        }
+
+        /* Generate different sizes and animations for flowers */
+        .flower:nth-child(1) { width: 20px; height: 20px; left: 10%; animation-duration: 12s; animation-delay: 0s; }
+        .flower:nth-child(2) { width: 15px; height: 15px; left: 30%; animation-duration: 18s; animation-delay: -2s; }
+        .flower:nth-child(3) { width: 25px; height: 25px; left: 50%; animation-duration: 15s; animation-delay: -5s; }
+        .flower:nth-child(4) { width: 12px; height: 12px; left: 70%; animation-duration: 20s; animation-delay: -1s; }
+        .flower:nth-child(5) { width: 22px; height: 22px; left: 90%; animation-duration: 14s; animation-delay: -7s; }
+        .flower:nth-child(6) { width: 18px; height: 18px; left: 20%; animation-duration: 22s; animation-delay: -12s; }
+        .flower:nth-child(7) { width: 14px; height: 14px; left: 80%; animation-duration: 16s; animation-delay: -3s; }
+
+        @keyframes float {
+            0% { transform: translateY(-10vh) rotate(0deg); opacity: 0; }
+            10% { opacity: 0.8; }
+            90% { opacity: 0.8; }
+            100% { transform: translateY(110vh) rotate(360deg); opacity: 0; }
+        }
+
+        /* --- Main Card --- */
+        .card {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            border-radius: 24px;
             padding: 40px 30px;
+            width: 90%;
+            max-width: 400px;
             text-align: center;
+            box-shadow: 0 20px 40px rgba(255, 117, 140, 0.15);
+            z-index: 1;
+            position: relative;
+            transition: transform 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
         }
 
         .logo {
-            font-size: 40px;
-            margin-bottom: 10px;
+            font-size: 48px;
+            margin-bottom: 15px;
+            display: inline-block;
+            animation: bounce 2s infinite ease-in-out;
+        }
+
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
         }
 
         h1 {
+            color: var(--text-dark);
             font-size: 24px;
-            font-weight: 700;
+            font-weight: 600;
             margin-bottom: 8px;
-            color: var(--text);
+            letter-spacing: 1px;
         }
 
         p.subtitle {
+            color: #888;
             font-size: 14px;
-            color: var(--text-muted);
             margin-bottom: 30px;
         }
 
         .input-group {
-            margin-bottom: 20px;
             text-align: left;
+            margin-bottom: 20px;
         }
 
-        .input-group label {
+        label {
             display: block;
             font-size: 13px;
             font-weight: 600;
+            color: #666;
             margin-bottom: 8px;
-            color: var(--text-muted);
+            margin-left: 4px;
         }
 
         input {
             width: 100%;
-            padding: 14px 16px;
-            font-size: 16px;
-            border: 1px solid var(--border);
+            padding: 15px;
+            border: 2px solid #ffe4e1;
+            background: #fff;
             border-radius: 12px;
+            font-size: 16px;
+            color: var(--text-dark);
+            transition: all 0.3s ease;
             outline: none;
-            transition: border-color 0.2s, box-shadow 0.2s;
-            background: #f9fafb;
         }
 
         input:focus {
-            border-color: var(--primary);
-            background: #ffffff;
-            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+            border-color: var(--primary-pink);
+            box-shadow: 0 0 0 4px rgba(255, 117, 140, 0.1);
         }
 
         button {
             width: 100%;
-            padding: 14px;
-            font-size: 16px;
-            font-weight: 600;
+            padding: 16px;
+            background: linear-gradient(135deg, var(--primary-pink), var(--hover-pink));
             color: white;
-            background: var(--primary);
             border: none;
             border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
             cursor: pointer;
-            transition: background 0.2s, transform 0.1s;
+            transition: all 0.3s ease;
+            box-shadow: 0 8px 15px rgba(255, 117, 140, 0.3);
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
         }
 
-        button:hover { background: var(--primary-hover); }
-        button:active { transform: scale(0.98); }
-        button:disabled { opacity: 0.7; cursor: not-allowed; }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 20px rgba(255, 117, 140, 0.4);
+        }
 
-        .code-box {
+        button:disabled {
+            background: #ffc0cb;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        /* --- Spinner --- */
+        .spinner {
             display: none;
-            margin-top: 25px;
-            padding: 20px;
-            background: #ecfdf5;
-            border: 1px dashed var(--primary);
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* --- Alerts --- */
+        .alert {
+            margin-top: 20px;
+            padding: 15px;
             border-radius: 12px;
-        }
-
-        .code-label {
-            font-size: 13px;
-            color: var(--text-muted);
-            margin-bottom: 8px;
-        }
-
-        .code-value {
-            font-size: 28px;
-            font-weight: 800;
-            color: var(--primary-hover);
-            letter-spacing: 4px;
-            font-family: monospace;
-        }
-
-        .error {
-            color: var(--error);
             font-size: 14px;
-            margin-top: 15px;
             display: none;
-            background: #fef2f2;
-            padding: 10px;
-            border-radius: 8px;
+            animation: fadeIn 0.3s ease;
         }
+
+        .alert.error {
+            background: #ffe6e6;
+            color: var(--error-red);
+            border: 1px solid #ffcccc;
+        }
+
+        .alert.success {
+            background: #e6ffe6;
+            color: var(--success-green);
+            border: 1px solid #ccffcc;
+            font-size: 18px;
+            font-weight: 600;
+            letter-spacing: 2px;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
     </style>
 </head>
 <body>
 
+    <!-- Floating Flowers Background -->
+    <div class="flowers-container">
+        <div class="flower"></div>
+        <div class="flower"></div>
+        <div class="flower"></div>
+        <div class="flower"></div>
+        <div class="flower"></div>
+        <div class="flower"></div>
+        <div class="flower"></div>
+    </div>
+
+    <!-- Main Card -->
     <div class="card">
         <div class="logo">🤖</div>
         <h1>303-XMD</h1>
         <p class="subtitle">Enter your WhatsApp number to link</p>
 
         <div class="input-group">
-            <label>Phone Number</label>
-            <input id="phone" type="tel" placeholder="e.g. 254794376595" autocomplete="off" />
+            <label for="phone">Phone Number</label>
+            <input type="tel" id="phone" placeholder="e.g. 254701491596" autocomplete="off">
         </div>
 
-        <button id="btn" onclick="pair()">Get Pairing Code</button>
+        <button id="submitBtn" onclick="getPairingCode()">
+            <span id="btnText">Get Pairing Code</span>
+            <div class="spinner" id="btnSpinner"></div>
+        </button>
 
-        <div id="codeBox" class="code-box">
-            <div class="code-label">Your Pairing Code</div>
-            <div id="codeValue" class="code-value">----</div>
-        </div>
-
-        <div id="err" class="error"></div>
+        <!-- Error Message -->
+        <div id="errorMsg" class="alert error"></div>
+        
+        <!-- Success Message -->
+        <div id="successMsg" class="alert success"></div>
     </div>
 
-<script>
-async function pair() {
-    const btn = document.getElementById("btn");
-    const phone = document.getElementById("phone").value.trim();
-    const err = document.getElementById("err");
-    const codeBox = document.getElementById("codeBox");
-    const codeValue = document.getElementById("codeValue");
+    <script>
+        async function getPairingCode() {
+            const phoneInput = document.getElementById('phone').value.trim();
+            const btn = document.getElementById('submitBtn');
+            const btnText = document.getElementById('btnText');
+            const spinner = document.getElementById('btnSpinner');
+            const errorMsg = document.getElementById('errorMsg');
+            const successMsg = document.getElementById('successMsg');
 
-    // Reset UI
-    err.style.display = "none";
-    codeBox.style.display = "none";
+            // Reset UI
+            errorMsg.style.display = 'none';
+            successMsg.style.display = 'none';
+            
+            // Basic Validation
+            if (!phoneInput || phoneInput.length < 7) {
+                errorMsg.innerText = "Please enter a valid phone number (with country code, no +).";
+                errorMsg.style.display = 'block';
+                return;
+            }
 
-    if (!phone) {
-        err.textContent = "Please enter your phone number.";
-        err.style.display = "block";
-        return;
-    }
+            // Loading State
+            btn.disabled = true;
+            btnText.innerText = "Generating Code...";
+            spinner.style.display = 'block';
 
-    // Disable button while loading
-    btn.disabled = true;
-    btn.textContent = "Generating...";
+            try {
+                // Send request to backend
+                const response = await fetch('/pair', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    // Using a hardcoded session ID for this demo. 
+                    // In production, generate a random one or use the phone number.
+                    body: JSON.stringify({ 
+                        sessionId: "session-" + phoneInput, 
+                        phone: phoneInput 
+                    })
+                });
 
-    try {
-        // Automatically generates a random session ID in the background
-        const sessionId = "sess_" + Math.random().toString(36).substring(2, 15);
+                // Check if Heroku returned an HTML error page instead of JSON
+                const text = await response.text();
+                let data;
+                
+                try {
+                    data = JSON.parse(text);
+                } catch (e) {
+                    // If it's not JSON, it's likely an HTML 503/504 error from Heroku
+                    throw new Error("Server timed out or crashed. Please try again.");
+                }
 
-        const r = await fetch("/pair", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sessionId, phone })
-        });
-        
-        const j = await r.json();
-        
-        if (!r.ok) throw new Error(j.error || "Failed to generate code");
+                // If backend returned an error message
+                if (!response.ok) {
+                    throw new Error(data.error || "Failed to generate code");
+                }
 
-        // Show code
-        codeValue.textContent = j.code;
-        codeBox.style.display = "block";
-        btn.textContent = "Code Generated ✓";
-        
-    } catch (e) {
-        err.textContent = e.message;
-        err.style.display = "block";
-        btn.textContent = "Get Pairing Code";
-        btn.disabled = false;
-    }
-}
-</script>
+                // Success!
+                successMsg.innerText = data.code;
+                successMsg.style.display = 'block';
+                
+            } catch (error) {
+                errorMsg.innerText = error.message;
+                errorMsg.style.display = 'block';
+            } finally {
+                // Reset Button State
+                btn.disabled = false;
+                btnText.innerText = "Get Pairing Code";
+                spinner.style.display = 'none';
+            }
+        }
+    </script>
 </body>
 </html>
