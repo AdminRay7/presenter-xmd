@@ -28,7 +28,7 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            overflow: hidden; /* Hide overflowing petals */
+            overflow: hidden;
             position: relative;
         }
 
@@ -52,7 +52,6 @@
             box-shadow: 0 0 10px rgba(255, 182, 193, 0.5);
         }
 
-        /* Generate different sizes and animations for flowers */
         .flower:nth-child(1) { width: 20px; height: 20px; left: 10%; animation-duration: 12s; animation-delay: 0s; }
         .flower:nth-child(2) { width: 15px; height: 15px; left: 30%; animation-duration: 18s; animation-delay: -2s; }
         .flower:nth-child(3) { width: 25px; height: 25px; left: 50%; animation-duration: 15s; animation-delay: -5s; }
@@ -222,7 +221,6 @@
             from { opacity: 0; transform: translateY(-10px); }
             to { opacity: 1; transform: translateY(0); }
         }
-
     </style>
 </head>
 <body>
@@ -254,10 +252,7 @@
             <div class="spinner" id="btnSpinner"></div>
         </button>
 
-        <!-- Error Message -->
         <div id="errorMsg" class="alert error"></div>
-        
-        <!-- Success Message -->
         <div id="successMsg" class="alert success"></div>
     </div>
 
@@ -270,60 +265,71 @@
             const errorMsg = document.getElementById('errorMsg');
             const successMsg = document.getElementById('successMsg');
 
-            // Reset UI
             errorMsg.style.display = 'none';
             successMsg.style.display = 'none';
-            
-            // Basic Validation
+
             if (!phoneInput || phoneInput.length < 7) {
-                errorMsg.innerText = "Please enter a valid phone number (with country code, no +).";
+                errorMsg.innerText = "Please enter a valid phone number (with country code).";
                 errorMsg.style.display = 'block';
                 return;
             }
 
-            // Loading State
             btn.disabled = true;
             btnText.innerText = "Generating Code...";
             spinner.style.display = 'block';
 
+            // We use the phone number as the unique ID
+            const sessionId = "session-" + phoneInput;
+
             try {
-                // Send request to backend
+                // 1. Send request to generate code in background
                 const response = await fetch('/pair', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    // Using a hardcoded session ID for this demo. 
-                    // In production, generate a random one or use the phone number.
-                    body: JSON.stringify({ 
-                        sessionId: "session-" + phoneInput, 
-                        phone: phoneInput 
-                    })
+                    body: JSON.stringify({ sessionId: sessionId, phone: phoneInput })
                 });
 
-                // Check if Heroku returned an HTML error page instead of JSON
                 const text = await response.text();
                 let data;
-                
-                try {
-                    data = JSON.parse(text);
-                } catch (e) {
-                    // If it's not JSON, it's likely an HTML 503/504 error from Heroku
-                    throw new Error("Server timed out or crashed. Please try again.");
-                }
+                try { data = JSON.parse(text); } 
+                catch (e) { throw new Error("Server error. Check logs."); }
 
-                // If backend returned an error message
-                if (!response.ok) {
-                    throw new Error(data.error || "Failed to generate code");
-                }
+                if (!response.ok) throw new Error(data.error || "Failed to start");
 
-                // Success!
-                successMsg.innerText = data.code;
-                successMsg.style.display = 'block';
+                // 2. Poll for pairing code every 3 seconds
+                let attempts = 0;
+                const maxAttempts = 20; // 1 minute max
                 
+                const pollInterval = setInterval(async () => {
+                    attempts++;
+                    try {
+                        const statusRes = await fetch('/api/status');
+                        const statusData = await statusRes.json();
+                        const session = statusData.sessions.find(s => s.id === sessionId);
+
+                        if (session && session.pairing) {
+                            clearInterval(pollInterval);
+                            successMsg.innerText = session.pairing;
+                            successMsg.style.display = 'block';
+                            btn.disabled = false;
+                            btnText.innerText = "Get Pairing Code";
+                            spinner.style.display = 'none';
+                        } else if (attempts >= maxAttempts) {
+                            clearInterval(pollInterval);
+                            errorMsg.innerText = "Code generation timed out. Please try again.";
+                            errorMsg.style.display = 'block';
+                            btn.disabled = false;
+                            btnText.innerText = "Get Pairing Code";
+                            spinner.style.display = 'none';
+                        }
+                    } catch (e) {
+                        // Ignore polling errors and try again
+                    }
+                }, 3000);
+
             } catch (error) {
                 errorMsg.innerText = error.message;
                 errorMsg.style.display = 'block';
-            } finally {
-                // Reset Button State
                 btn.disabled = false;
                 btnText.innerText = "Get Pairing Code";
                 spinner.style.display = 'none';
