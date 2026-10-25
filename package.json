@@ -4,20 +4,27 @@
   "description": "303-XMD — The Last Key",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node --max-old-space-size=1024 --enable-source-maps --expose-gc index.js"
+  },
+  "keywords": [
+    "whatsapp",
+    "bot",
+    "baileys",
+    "newsletter",
+    "303-xmd"
+  ],
+  "author": "mr presenter",
+  "license": "MIT",
+  "dependencies": {
+    "@whiskeysockets/baileys": "6.7.24",
+    "chalk": "^4.1.2",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "mongoose": "^8.0.0",
+    "mongodb": "^6.7.0",
+    "pino": "^8.0.0"
   },
   "engines": {
-    "node": ">=20"
-  },
-  "dependencies": {
-    "@whiskeysockets/baileys": "6.7.9",
-    "axios": "^1.7.9",
-    "dotenv": "^16.4.7",
-    "express": "^4.21.2",
-    "https-proxy-agent": "^7.0.5",
-    "mongodb": "^6.12.0",
-    "mongoose": "^8.9.5",
-    "openai": "^4.77.0",
-    "pino": "^9.5.0"
+    "node": "20.x"
   }
 }
