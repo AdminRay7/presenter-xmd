@@ -49,7 +49,7 @@ function maskJid(jid) {
 }
 
 // ============================================================
-//   PER-SESSION LOCK (replaces global pairing queue)
+//   PER-SESSION LOCK
 // ============================================================
 const sessionLocks = new Map();
 async function withSessionLock(sessionId, fn) {
@@ -84,12 +84,10 @@ function initMongo() {
 }
 
 // ============================================================
-//   WELCOME MESSAGE (fires once per session)
+//   WELCOME MESSAGE
 // ============================================================
 async function sendWelcomeMessage(sessionId, session, conn) {
     if (session.welcomed) return;
-
-    // Only run if the "welcome" flag isn't already persisted
     try {
         const collection = await initMongo();
         const meta = await collection.findOne({ _id: `${sessionId}:meta` });
@@ -100,27 +98,11 @@ async function sendWelcomeMessage(sessionId, session, conn) {
 
         const jid = conn.user?.id;
         if (!jid) return;
-
-        // Real JID (not the LID-style device suffix) — strip :device
         const userJid = jid.split(":")[0] + "@s.whatsapp.net";
 
-        const text =
-`👋 *Welcome to ${cfg.name}!*
+        const text = `👋 *Welcome to ${cfg.name}!*\n\nHi there! I'm your personal assistant — I'm now connected to your WhatsApp account.\n\nType *!help* to see all available commands.`;
 
-Hi there! I'm your personal assistant — I'm now connected to your WhatsApp account.
-
-Here's what I can do:
-• 🤖 Respond to commands
-• 🔗 Fetch links & media
-• 🧠 Remember your settings
-
-Type *!help* to see all available commands.
-
-_Looking forward to chatting with you — let's get started!_ ✨`;
-
-        // Small settle delay so init queries complete
         await new Promise((r) => setTimeout(r, 1500));
-
         await conn.sendMessage(userJid, { text });
 
         await collection.updateOne(
@@ -147,6 +129,7 @@ async function bootSocket(sessionId, session) {
 
     let version;
     try {
+        // FIX 405: Use WaWebVersion
         const v = await fetchLatestWaWebVersion();
         version = v.version;
         console.log(`[${sessionId}] ${fancy("WA version")}: ${JSON.stringify(version)}`);
@@ -171,16 +154,14 @@ async function bootSocket(sessionId, session) {
         defaultQueryTimeoutMs: 60000,
         keepAliveIntervalMs: 60000,
         retryRequestDelayMs: 2000,
-        fireInitQueries: true, // needed so conn.user + queries are ready for welcome
+        fireInitQueries: true, 
         emitOwnEvents: false,
     });
 
     session.conn = conn;
 
     conn.ev.on("creds.update", () => {
-        saveCreds().catch((e) =>
-            console.error(`[${sessionId}] saveCreds:`, e.message)
-        );
+        saveCreds().catch((e) => console.error(`[${sessionId}] saveCreds:`, e.message));
     });
 
     conn.ev.on("connection.update", async (update) => {
@@ -188,7 +169,6 @@ async function bootSocket(sessionId, session) {
 
         if (connection === "connecting") {
             session.socketConnecting = true;
-            console.log(`🔌 [${sessionId}] ${fancy("connecting")}`);
         }
 
         if (connection === "open") {
@@ -206,7 +186,6 @@ async function bootSocket(sessionId, session) {
                 );
             } catch {}
 
-            // Fire welcome (once)
             sendWelcomeMessage(sessionId, session, conn).catch((e) =>
                 console.error(`[${sessionId}] welcome:`, e.message)
             );
@@ -224,11 +203,7 @@ async function bootSocket(sessionId, session) {
             if (session._paused) return;
 
             if (code === 401 || code === DisconnectReason.loggedOut) {
-                try {
-                    await logoutSession(sessionId);
-                } catch (e) {
-                    console.error(`[${sessionId}] logout error:`, e.message);
-                }
+                try { await logoutSession(sessionId); } catch {}
                 return;
             }
 
@@ -237,9 +212,7 @@ async function bootSocket(sessionId, session) {
             setTimeout(() => {
                 if (!global.sessions.has(sessionId)) return;
                 if (session._paused) return;
-                bootSocket(sessionId, session).catch((e) =>
-                    console.error(`Reconnect ${sessionId}:`, e.message)
-                );
+                bootSocket(sessionId, session).catch((e) => console.error(`Reconnect ${sessionId}:`, e.message));
             }, 5000);
         }
     });
@@ -254,7 +227,7 @@ async function bootSocket(sessionId, session) {
 }
 
 // ============================================================
-//   PAIRING
+//   PAIRING (QR EVENT TRIGGER)
 // ============================================================
 async function requestPairingCodeForSession(sessionId, phoneNumber) {
     if (!isValidSessionId(sessionId)) throw new Error("Invalid sessionId");
@@ -267,45 +240,34 @@ async function requestPairingCodeForSession(sessionId, phoneNumber) {
 
         if (!session) {
             session = {
-                conn: null,
-                socketReady: false,
-                socketConnecting: false,
-                pairing: null,
-                pairingNumber: null,
-                startedAt: Date.now(),
-                welcomed: false,
+                conn: null, socketReady: false, socketConnecting: false,
+                pairing: null, pairingNumber: null, startedAt: Date.now(), welcomed: false,
             };
             global.sessions.set(sessionId, session);
-
             try {
                 await bootSocket(sessionId, session);
             } catch (e) {
-                // Don't leave a broken session in the map
                 global.sessions.delete(sessionId);
                 throw e;
             }
         }
 
-        // Wait until socket is actually ready (open) OR give up
-        const deadline = Date.now() + 30000;
-        while (!session.socketReady && Date.now() < deadline) {
-            await new Promise((r) => setTimeout(r, 500));
-        }
-        if (!session.socketReady) {
-            global.sessions.delete(sessionId);
-            throw new Error("Socket not ready, try again");
-        }
-
-        // Settle time — WhatsApp needs a beat before accepting a code
-        await new Promise((r) => setTimeout(r, 2000));
-
-        let code;
-        try {
-            code = await session.conn.requestPairingCode(phoneNumber);
-        } catch (e) {
-            await new Promise((r) => setTimeout(r, 2000));
-            code = await session.conn.requestPairingCode(phoneNumber);
-        }
+        // FIX: Wait for the 'qr' event to ensure Baileys is fully ready
+        const code = await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error("Socket timeout")), 25000);
+            
+            const onUpdate = async (update) => {
+                if (update.qr) {
+                    clearTimeout(timeout);
+                    session.conn.ev.off('connection.update', onUpdate);
+                    try {
+                        const raw = await session.conn.requestPairingCode(phoneNumber);
+                        resolve(raw);
+                    } catch (e) { reject(e); }
+                }
+            };
+            session.conn.ev.on('connection.update', onUpdate);
+        });
 
         const formatted = code.match(/.{1,4}/g)?.join("-") || code;
         session.pairing = formatted;
@@ -318,9 +280,7 @@ async function requestPairingCodeForSession(sessionId, phoneNumber) {
                 { $set: { phoneNumber, updatedAt: Date.now() } },
                 { upsert: true }
             );
-        } catch (e) {
-            /* optional model — don't hard-fail */
-        }
+        } catch (e) {}
 
         console.log(`✅ [${sessionId}] ${fancy("pairing code")}: ${formatted}`);
         return formatted;
@@ -333,10 +293,7 @@ async function requestPairingCodeForSession(sessionId, phoneNumber) {
 async function logoutSession(sessionId) {
     const s = global.sessions.get(sessionId);
     if (s) {
-        try {
-            s.conn?.ev.removeAllListeners();
-            s.conn?.ws?.close();
-        } catch {}
+        try { s.conn?.ev.removeAllListeners(); s.conn?.ws?.close(); } catch {}
         global.sessions.delete(sessionId);
     }
     try {
@@ -360,12 +317,8 @@ async function resumeAllSessions() {
             if (global.sessions.has(sessionId)) continue;
 
             const session = {
-                conn: null,
-                socketReady: false,
-                socketConnecting: false,
-                pairing: null,
-                pairingNumber: null,
-                startedAt: Date.now(),
+                conn: null, socketReady: false, socketConnecting: false,
+                pairing: null, pairingNumber: null, startedAt: Date.now(),
                 welcomed: !!meta?.value?.welcomed,
             };
             global.sessions.set(sessionId, session);
@@ -383,7 +336,7 @@ async function resumeAllSessions() {
 }
 
 // ============================================================
-//   EXPRESS DASHBOARD
+//   EXPRESS DASHBOARD & API
 // ============================================================
 const app = express();
 app.use(express.json({ limit: "64kb" }));
@@ -399,8 +352,12 @@ app.post("/pair", async (req, res) => {
         if (digits.length < 7 || digits.length > 15) {
             return res.status(400).json({ error: "invalid phone number" });
         }
-        const code = await requestPairingCodeForSession(sessionId, digits);
-        res.json({ ok: true, code });
+
+        // FIX: Run in background to prevent Heroku H12 Timeout
+        requestPairingCodeForSession(sessionId, digits)
+            .catch(err => console.error(`[${sessionId}] Pairing failed:`, err.message));
+
+        res.json({ ok: true, message: "Generating code..." });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
