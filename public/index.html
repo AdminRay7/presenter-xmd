@@ -4,117 +4,65 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>303-XMD | Link Device</title>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
     <style>
         :root {
-            --primary-pink: #ff758c;
-            --hover-pink: #ff7eb3;
-            --bg-pink: #fff0f5;
-            --text-dark: #4a4a4a;
-            --error-red: #ff4d4d;
-            --success-green: #2ecc71;
+            --bg: #0f172a;
+            --card: #1e293b;
+            --text: #f8fafc;
+            --muted: #94a3b8;
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --error-bg: #451a03;
+            --error-text: #f87171;
+            --success: #10b981;
         }
 
         * {
             box-sizing: border-box;
             margin: 0;
             padding: 0;
-            font-family: 'Poppins', sans-serif;
+            font-family: 'Inter', sans-serif;
         }
 
         body {
-            background: linear-gradient(135deg, #ffe6f0 0%, #fff5f8 100%);
-            min-height: 100vh;
+            background-color: var(--bg);
+            color: var(--text);
             display: flex;
             justify-content: center;
             align-items: center;
-            overflow: hidden;
-            position: relative;
+            min-height: 100vh;
+            padding: 20px;
         }
 
-        /* --- Floating Flowers Background --- */
-        .flowers-container {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-            z-index: 0;
-        }
-
-        .flower {
-            position: absolute;
-            background-color: #ffb6c1;
-            border-radius: 50% 0 50% 0;
-            opacity: 0.6;
-            animation: float linear infinite;
-            box-shadow: 0 0 10px rgba(255, 182, 193, 0.5);
-        }
-
-        .flower:nth-child(1) { width: 20px; height: 20px; left: 10%; animation-duration: 12s; animation-delay: 0s; }
-        .flower:nth-child(2) { width: 15px; height: 15px; left: 30%; animation-duration: 18s; animation-delay: -2s; }
-        .flower:nth-child(3) { width: 25px; height: 25px; left: 50%; animation-duration: 15s; animation-delay: -5s; }
-        .flower:nth-child(4) { width: 12px; height: 12px; left: 70%; animation-duration: 20s; animation-delay: -1s; }
-        .flower:nth-child(5) { width: 22px; height: 22px; left: 90%; animation-duration: 14s; animation-delay: -7s; }
-        .flower:nth-child(6) { width: 18px; height: 18px; left: 20%; animation-duration: 22s; animation-delay: -12s; }
-        .flower:nth-child(7) { width: 14px; height: 14px; left: 80%; animation-duration: 16s; animation-delay: -3s; }
-
-        @keyframes float {
-            0% { transform: translateY(-10vh) rotate(0deg); opacity: 0; }
-            10% { opacity: 0.8; }
-            90% { opacity: 0.8; }
-            100% { transform: translateY(110vh) rotate(360deg); opacity: 0; }
-        }
-
-        /* --- Main Card --- */
-        .card {
-            background: rgba(255, 255, 255, 0.85);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.5);
-            border-radius: 24px;
+        .container {
+            background-color: var(--card);
+            border-radius: 16px;
             padding: 40px 30px;
-            width: 90%;
+            width: 100%;
             max-width: 400px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
             text-align: center;
-            box-shadow: 0 20px 40px rgba(255, 117, 140, 0.15);
-            z-index: 1;
-            position: relative;
-            transition: transform 0.3s ease;
-        }
-
-        .card:hover {
-            transform: translateY(-5px);
         }
 
         .logo {
-            font-size: 48px;
-            margin-bottom: 15px;
-            display: inline-block;
-            animation: bounce 2s infinite ease-in-out;
-        }
-
-        @keyframes bounce {
-            0%, 100% { transform: translateY(0); }
-            50% { transform: translateY(-10px); }
-        }
-
-        h1 {
-            color: var(--text-dark);
-            font-size: 24px;
-            font-weight: 600;
+            font-size: 28px;
+            font-weight: 800;
+            letter-spacing: -1px;
             margin-bottom: 8px;
-            letter-spacing: 1px;
         }
 
-        p.subtitle {
-            color: #888;
+        .logo span {
+            color: var(--primary);
+        }
+
+        .subtitle {
+            color: var(--muted);
             font-size: 14px;
             margin-bottom: 30px;
         }
 
-        .input-group {
+        .form-group {
             text-align: left;
             margin-bottom: 20px;
         }
@@ -123,42 +71,37 @@
             display: block;
             font-size: 13px;
             font-weight: 600;
-            color: #666;
+            color: var(--muted);
             margin-bottom: 8px;
-            margin-left: 4px;
         }
 
-        input {
+        input[type="tel"] {
             width: 100%;
-            padding: 15px;
-            border: 2px solid #ffe4e1;
-            background: #fff;
-            border-radius: 12px;
+            padding: 14px 16px;
+            border-radius: 8px;
+            border: 1px solid #334155;
+            background-color: #0f172a;
+            color: var(--text);
             font-size: 16px;
-            color: var(--text-dark);
-            transition: all 0.3s ease;
             outline: none;
+            transition: border-color 0.2s;
         }
 
-        input:focus {
-            border-color: var(--primary-pink);
-            box-shadow: 0 0 0 4px rgba(255, 117, 140, 0.1);
+        input[type="tel"]:focus {
+            border-color: var(--primary);
         }
 
         button {
             width: 100%;
-            padding: 16px;
-            background: linear-gradient(135deg, var(--primary-pink), var(--hover-pink));
-            color: white;
+            padding: 14px;
+            border-radius: 8px;
             border: none;
-            border-radius: 12px;
+            background-color: var(--primary);
+            color: white;
             font-size: 16px;
             font-weight: 600;
             cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 8px 15px rgba(255, 117, 140, 0.3);
-            position: relative;
-            overflow: hidden;
+            transition: background-color 0.2s;
             display: flex;
             justify-content: center;
             align-items: center;
@@ -166,175 +109,180 @@
         }
 
         button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 12px 20px rgba(255, 117, 140, 0.4);
+            background-color: var(--primary-hover);
         }
 
         button:disabled {
-            background: #ffc0cb;
+            opacity: 0.7;
             cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
         }
 
-        /* --- Spinner --- */
-        .spinner {
+        .error-box {
+            background-color: var(--error-bg);
+            color: var(--error-text);
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-top: 20px;
             display: none;
+        }
+
+        .success-box {
+            display: none;
+        }
+
+        .code-display {
+            background-color: #0f172a;
+            border: 2px dashed var(--success);
+            color: var(--success);
+            font-size: 32px;
+            font-weight: 800;
+            letter-spacing: 4px;
+            padding: 20px;
+            border-radius: 12px;
+            margin: 20px 0;
+        }
+
+        .instructions {
+            font-size: 13px;
+            color: var(--muted);
+            text-align: left;
+            background-color: #0f172a;
+            padding: 16px;
+            border-radius: 8px;
+            margin-top: 20px;
+            line-height: 1.6;
+        }
+
+        .instructions b {
+            color: var(--text);
+        }
+
+        /* Loading Spinner */
+        .spinner {
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top: 3px solid white;
             width: 20px;
             height: 20px;
-            border: 3px solid rgba(255, 255, 255, 0.3);
-            border-radius: 50%;
-            border-top-color: white;
-            animation: spin 1s ease-in-out infinite;
+            animation: spin 1s linear infinite;
         }
 
         @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        /* --- Alerts --- */
-        .alert {
-            margin-top: 20px;
-            padding: 15px;
-            border-radius: 12px;
-            font-size: 14px;
-            display: none;
-            animation: fadeIn 0.3s ease;
-        }
-
-        .alert.error {
-            background: #ffe6e6;
-            color: var(--error-red);
-            border: 1px solid #ffcccc;
-        }
-
-        .alert.success {
-            background: #e6ffe6;
-            color: var(--success-green);
-            border: 1px solid #ccffcc;
-            font-size: 18px;
-            font-weight: 600;
-            letter-spacing: 2px;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(-10px); }
-            to { opacity: 1; transform: translateY(0); }
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
     </style>
 </head>
 <body>
 
-    <!-- Floating Flowers Background -->
-    <div class="flowers-container">
-        <div class="flower"></div>
-        <div class="flower"></div>
-        <div class="flower"></div>
-        <div class="flower"></div>
-        <div class="flower"></div>
-        <div class="flower"></div>
-        <div class="flower"></div>
-    </div>
+    <div class="container">
+        <!-- FORM VIEW -->
+        <div id="form-view">
+            <div class="logo">303<span>-XMD</span></div>
+            <div class="subtitle">Link your WhatsApp device</div>
 
-    <!-- Main Card -->
-    <div class="card">
-        <div class="logo">🤖</div>
-        <h1>303-XMD</h1>
-        <p class="subtitle">Enter your WhatsApp number to link</p>
+            <div class="form-group">
+                <label>WhatsApp Number (with country code)</label>
+                <input type="tel" id="phoneNumber" placeholder="e.g. 254712345678" maxlength="15">
+            </div>
 
-        <div class="input-group">
-            <label for="phone">Phone Number</label>
-            <input type="tel" id="phone" placeholder="e.g. 254701491596" autocomplete="off">
+            <button id="pairBtn">Get Pairing Code</button>
+            
+            <div id="errorBox" class="error-box"></div>
         </div>
 
-        <button id="submitBtn" onclick="getPairingCode()">
-            <span id="btnText">Get Pairing Code</span>
-            <div class="spinner" id="btnSpinner"></div>
-        </button>
+        <!-- SUCCESS VIEW -->
+        <div id="success-view" class="success-box">
+            <div class="logo" style="color:var(--success)">Code Ready</div>
+            <div class="subtitle">Enter this on your phone</div>
+            
+            <div id="pairingCode" class="code-display">----</div>
+            
+            <div class="instructions">
+                <b>How to link:</b><br>
+                1. Open WhatsApp on your phone.<br>
+                2. Go to <b>Linked Devices</b>.<br>
+                3. Tap <b>Link with Phone Number</b>.<br>
+                4. Enter the code above.
+            </div>
 
-        <div id="errorMsg" class="alert error"></div>
-        <div id="successMsg" class="alert success"></div>
+            <button id="resetBtn" style="margin-top: 20px; background-color: transparent; border: 1px solid #334155;">
+                Pair another device
+            </button>
+        </div>
     </div>
 
     <script>
-        async function getPairingCode() {
-            const phoneInput = document.getElementById('phone').value.trim();
-            const btn = document.getElementById('submitBtn');
-            const btnText = document.getElementById('btnText');
-            const spinner = document.getElementById('btnSpinner');
-            const errorMsg = document.getElementById('errorMsg');
-            const successMsg = document.getElementById('successMsg');
+        const pairBtn = document.getElementById('pairBtn');
+        const phoneNumber = document.getElementById('phoneNumber');
+        const errorBox = document.getElementById('errorBox');
+        const formView = document.getElementById('form-view');
+        const successView = document.getElementById('success-view');
+        const pairingCode = document.getElementById('pairingCode');
+        const resetBtn = document.getElementById('resetBtn');
 
-            errorMsg.style.display = 'none';
-            successMsg.style.display = 'none';
-
-            if (!phoneInput || phoneInput.length < 7) {
-                errorMsg.innerText = "Please enter a valid phone number (with country code).";
-                errorMsg.style.display = 'block';
+        pairBtn.addEventListener('click', async () => {
+            const num = phoneNumber.value.replace(/\D/g, '');
+            
+            if (num.length < 10 || num.length > 15) {
+                showError("Please enter a valid number with country code.");
                 return;
             }
 
-            btn.disabled = true;
-            btnText.innerText = "Generating Code...";
-            spinner.style.display = 'block';
+            // Reset UI
+            errorBox.style.display = 'none';
+            pairBtn.disabled = true;
+            pairBtn.innerHTML = '<div class="spinner"></div> Generating...';
 
-            // We use the phone number as the unique ID
-            const sessionId = "session-" + phoneInput;
+            // Generate a random session ID for this pairing
+            const sessionId = 'sess_' + Math.random().toString(36).slice(2, 10);
 
             try {
-                // 1. Send request to generate code in background
-                const response = await fetch('/pair', {
+                // Note: The URL is /api/pair to match the new index.js
+                const response = await fetch('/api/pair', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ sessionId: sessionId, phone: phoneInput })
+                    body: JSON.stringify({ sessionId, num })
                 });
 
-                const text = await response.text();
-                let data;
-                try { data = JSON.parse(text); } 
-                catch (e) { throw new Error("Server error. Check logs."); }
+                const data = await response.json();
 
-                if (!response.ok) throw new Error(data.error || "Failed to start");
+                // Check if the server returned an error
+                if (!response.ok || data.error) {
+                    throw new Error(data.error || "Failed to generate code");
+                }
 
-                // 2. Poll for pairing code every 3 seconds
-                let attempts = 0;
-                const maxAttempts = 20; // 1 minute max
-                
-                const pollInterval = setInterval(async () => {
-                    attempts++;
-                    try {
-                        const statusRes = await fetch('/api/status');
-                        const statusData = await statusRes.json();
-                        const session = statusData.sessions.find(s => s.id === sessionId);
+                // Show success view
+                formView.style.display = 'none';
+                successView.style.display = 'block';
+                pairingCode.textContent = data.code;
 
-                        if (session && session.pairing) {
-                            clearInterval(pollInterval);
-                            successMsg.innerText = session.pairing;
-                            successMsg.style.display = 'block';
-                            btn.disabled = false;
-                            btnText.innerText = "Get Pairing Code";
-                            spinner.style.display = 'none';
-                        } else if (attempts >= maxAttempts) {
-                            clearInterval(pollInterval);
-                            errorMsg.innerText = "Code generation timed out. Please try again.";
-                            errorMsg.style.display = 'block';
-                            btn.disabled = false;
-                            btnText.innerText = "Get Pairing Code";
-                            spinner.style.display = 'none';
-                        }
-                    } catch (e) {
-                        // Ignore polling errors and try again
-                    }
-                }, 3000);
-
-            } catch (error) {
-                errorMsg.innerText = error.message;
-                errorMsg.style.display = 'block';
-                btn.disabled = false;
-                btnText.innerText = "Get Pairing Code";
-                spinner.style.display = 'none';
+            } catch (err) {
+                showError(err.message);
+                pairBtn.disabled = false;
+                pairBtn.innerHTML = 'Get Pairing Code';
             }
+        });
+
+        resetBtn.addEventListener('click', () => {
+            phoneNumber.value = '';
+            formView.style.display = 'block';
+            successView.style.display = 'none';
+            pairBtn.disabled = false;
+            pairBtn.innerHTML = 'Get Pairing Code';
+            errorBox.style.display = 'none';
+        });
+
+        function showError(msg) {
+            errorBox.textContent = msg;
+            errorBox.style.display = 'block';
         }
+
+        // Allow pressing "Enter" to submit
+        phoneNumber.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') pairBtn.click();
+        });
     </script>
 </body>
 </html>
