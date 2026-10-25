@@ -4,12 +4,11 @@
   "description": "303-XMD — The Last Key",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "node --watch index.js"
+    "start": "node index.js"
   },
   "engines": {
-    "node": ">=20",
-    "npm": ">=10"
+    "node": "20.x",
+    "npm": "10.x"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "6.7.9",
@@ -21,8 +20,5 @@
     "mongoose": "^8.9.5",
     "openai": "^4.77.0",
     "pino": "^9.5.0"
-  },
-  "devDependencies": {
-    "pino-pretty": "^13.0.0"
   }
 }
