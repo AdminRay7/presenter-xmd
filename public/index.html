@@ -3,7 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex,nofollow">
     <title>303-XMD | Link Device</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -16,13 +19,15 @@
             --error-bg: #451a03;
             --error-text: #f87171;
             --success: #10b981;
+            --warning: #f59e0b;
+            --border: #334155;
         }
 
         * {
             box-sizing: border-box;
             margin: 0;
             padding: 0;
-            font-family: 'Inter', sans-serif;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
         }
 
         body {
@@ -40,7 +45,7 @@
             border-radius: 16px;
             padding: 40px 30px;
             width: 100%;
-            max-width: 400px;
+            max-width: 420px;
             box-shadow: 0 10px 25px rgba(0,0,0,0.5);
             text-align: center;
         }
@@ -75,20 +80,23 @@
             margin-bottom: 8px;
         }
 
-        input[type="tel"] {
+        input[type="tel"],
+        input[type="password"] {
             width: 100%;
             padding: 14px 16px;
             border-radius: 8px;
-            border: 1px solid #334155;
+            border: 1px solid var(--border);
             background-color: #0f172a;
             color: var(--text);
             font-size: 16px;
             outline: none;
-            transition: border-color 0.2s;
+            transition: border-color 0.2s, box-shadow 0.2s;
         }
 
-        input[type="tel"]:focus {
+        input[type="tel"]:focus,
+        input[type="password"]:focus {
             border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
         }
 
         button {
@@ -101,20 +109,37 @@
             font-size: 16px;
             font-weight: 600;
             cursor: pointer;
-            transition: background-color 0.2s;
+            transition: background-color 0.2s, transform 0.05s;
             display: flex;
             justify-content: center;
             align-items: center;
             gap: 10px;
         }
 
-        button:hover {
+        button:hover:not(:disabled) {
             background-color: var(--primary-hover);
+        }
+
+        button:active:not(:disabled) {
+            transform: translateY(1px);
         }
 
         button:disabled {
             opacity: 0.7;
             cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background-color: transparent !important;
+            border: 1px solid var(--border) !important;
+            color: var(--muted) !important;
+            font-size: 14px !important;
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            color: var(--text) !important;
+            border-color: var(--primary) !important;
+            background-color: transparent !important;
         }
 
         .error-box {
@@ -124,11 +149,21 @@
             border-radius: 8px;
             font-size: 14px;
             margin-top: 20px;
+            text-align: left;
+            line-height: 1.5;
             display: none;
+        }
+
+        .error-box.visible {
+            display: block;
         }
 
         .success-box {
             display: none;
+        }
+
+        .success-box.visible {
+            display: block;
         }
 
         .code-display {
@@ -141,6 +176,36 @@
             padding: 20px;
             border-radius: 12px;
             margin: 20px 0;
+            font-family: 'Courier New', monospace;
+            word-break: break-all;
+            user-select: all;
+        }
+
+        .code-actions {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .code-actions button {
+            padding: 10px;
+            font-size: 14px;
+        }
+
+        .countdown {
+            font-size: 13px;
+            color: var(--muted);
+            margin-bottom: 20px;
+        }
+
+        .countdown.expiring {
+            color: var(--warning);
+            font-weight: 600;
+        }
+
+        .countdown.expired {
+            color: var(--error-text);
+            font-weight: 600;
         }
 
         .instructions {
@@ -151,14 +216,22 @@
             padding: 16px;
             border-radius: 8px;
             margin-top: 20px;
-            line-height: 1.6;
+            line-height: 1.7;
         }
 
         .instructions b {
             color: var(--text);
         }
 
-        /* Loading Spinner */
+        .instructions ol {
+            margin-left: 18px;
+            margin-top: 6px;
+        }
+
+        .instructions li {
+            margin-bottom: 4px;
+        }
+
         .spinner {
             border: 3px solid rgba(255,255,255,0.3);
             border-radius: 50%;
@@ -166,123 +239,390 @@
             width: 20px;
             height: 20px;
             animation: spin 1s linear infinite;
+            flex-shrink: 0;
         }
 
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* Small screens */
+        @media (max-width: 360px) {
+            .container {
+                padding: 28px 20px;
+            }
+            .code-display {
+                font-size: 24px;
+                letter-spacing: 3px;
+            }
+        }
     </style>
 </head>
 <body>
 
     <div class="container">
-        <!-- FORM VIEW -->
+
+        <!-- =====================================================
+             FORM VIEW
+             ===================================================== -->
         <div id="form-view">
             <div class="logo">303<span>-XMD</span></div>
             <div class="subtitle">Link your WhatsApp device</div>
 
             <div class="form-group">
-                <label>WhatsApp Number (with country code)</label>
-                <input type="tel" id="phoneNumber" placeholder="e.g. 254712345678" maxlength="15">
+                <label for="phoneNumber">WhatsApp Number (with country code)</label>
+                <input
+                    type="tel"
+                    id="phoneNumber"
+                    placeholder="e.g. 254712345678"
+                    maxlength="20"
+                    inputmode="numeric"
+                    autocomplete="tel"
+                    spellcheck="false"
+                >
             </div>
 
-            <button id="pairBtn">Get Pairing Code</button>
-            
-            <div id="errorBox" class="error-box"></div>
+            <!-- Only shown if the server returns 401 -->
+            <div class="form-group hidden" id="secret-group">
+                <label for="pairSecret">Pairing password</label>
+                <input
+                    type="password"
+                    id="pairSecret"
+                    placeholder="Enter pair secret"
+                    autocomplete="current-password"
+                    spellcheck="false"
+                >
+            </div>
+
+            <button id="pairBtn" type="button">Get Pairing Code</button>
+
+            <div id="errorBox" class="error-box" role="alert" aria-live="polite"></div>
         </div>
 
-        <!-- SUCCESS VIEW -->
+        <!-- =====================================================
+             SUCCESS VIEW
+             ===================================================== -->
         <div id="success-view" class="success-box">
             <div class="logo" style="color:var(--success)">Code Ready</div>
             <div class="subtitle">Enter this on your phone</div>
-            
-            <div id="pairingCode" class="code-display">----</div>
-            
-            <div class="instructions">
-                <b>How to link:</b><br>
-                1. Open WhatsApp on your phone.<br>
-                2. Go to <b>Linked Devices</b>.<br>
-                3. Tap <b>Link with Phone Number</b>.<br>
-                4. Enter the code above.
+
+            <div id="pairingCode" class="code-display" aria-live="polite">----</div>
+
+            <div class="code-actions">
+                <button id="copyBtn" type="button" class="btn-secondary">Copy Code</button>
             </div>
 
-            <button id="resetBtn" style="margin-top: 20px; background-color: transparent; border: 1px solid #334155;">
+            <div id="countdown" class="countdown"></div>
+
+            <div class="instructions">
+                <b>How to link:</b>
+                <ol>
+                    <li>Open WhatsApp on your phone.</li>
+                    <li>Go to <b>Settings → Linked Devices</b>.</li>
+                    <li>Tap <b>Link with Phone Number</b>.</li>
+                    <li>Enter the 8-digit code above.</li>
+                </ol>
+            </div>
+
+            <button id="resetBtn" type="button" class="btn-secondary" style="margin-top: 20px;">
                 Pair another device
             </button>
         </div>
+
     </div>
 
     <script>
-        const pairBtn = document.getElementById('pairBtn');
-        const phoneNumber = document.getElementById('phoneNumber');
-        const errorBox = document.getElementById('errorBox');
-        const formView = document.getElementById('form-view');
-        const successView = document.getElementById('success-view');
-        const pairingCode = document.getElementById('pairingCode');
-        const resetBtn = document.getElementById('resetBtn');
+        'use strict';
 
+        /* ---------- Config ---------- */
+        const PAIR_ENDPOINT       = '/api/pair';
+        const LOGOUT_ENDPOINT     = '/api/logout';
+        const CODE_EXPIRY_SECONDS = 60;
+        const SLOW_WARNING_MS     = 15000;
+        const STORAGE_KEY         = 'xmd_pair_session';
+
+        /* ---------- DOM ---------- */
+        const pairBtn    = document.getElementById('pairBtn');
+        const phoneInput = document.getElementById('phoneNumber');
+        const secretInput = document.getElementById('pairSecret');
+        const secretGroup = document.getElementById('secret-group');
+        const errorBox   = document.getElementById('errorBox');
+        const formView   = document.getElementById('form-view');
+        const successView = document.getElementById('success-view');
+        const codeDisplay = document.getElementById('pairingCode');
+        const copyBtn    = document.getElementById('copyBtn');
+        const resetBtn   = document.getElementById('resetBtn');
+        const countdown  = document.getElementById('countdown');
+
+        /* ---------- State ---------- */
+        let currentSessionId = null;
+        let slowWarnTimer    = null;
+        let countdownTimer   = null;
+        let countdownEnds    = 0;
+
+        /* ---------- Helpers ---------- */
+        function showError(msg) {
+            errorBox.textContent = msg;
+            errorBox.classList.add('visible');
+        }
+
+        function clearError() {
+            errorBox.textContent = '';
+            errorBox.classList.remove('visible');
+        }
+
+        function setBusy(busy, text = 'Get Pairing Code') {
+            pairBtn.disabled = busy;
+            pairBtn.setAttribute('aria-busy', busy ? 'true' : 'false');
+            pairBtn.innerHTML = busy
+                ? '<div class="spinner"></div> Generating...'
+                : text;
+        }
+
+        function sanitizePhone(raw) {
+            return String(raw || '').replace(/\D/g, '');
+        }
+
+        function generateSessionId() {
+            const rand = (Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)).slice(0, 12);
+            return 'sess_' + rand;
+        }
+
+        function getStoredSession(num) {
+            try {
+                const raw = localStorage.getItem(STORAGE_KEY);
+                if (!raw) return null;
+                const parsed = JSON.parse(raw);
+                if (parsed && parsed.num === num && parsed.sessionId) return parsed.sessionId;
+            } catch { /* ignore */ }
+            return null;
+        }
+
+        function storeSession(num, sessionId) {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify({ num, sessionId, at: Date.now() }));
+            } catch { /* quota — non-fatal */ }
+        }
+
+        function clearStoredSession() {
+            try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+        }
+
+        async function safeJson(res) {
+            const text = await res.text();
+            try { return text ? JSON.parse(text) : {}; }
+            catch { return { error: text || `HTTP ${res.status}` }; }
+        }
+
+        /* ---------- Countdown ---------- */
+        function startCountdown(seconds) {
+            stopCountdown();
+            countdownEnds = Date.now() + seconds * 1000;
+            tickCountdown();
+            countdownTimer = setInterval(tickCountdown, 1000);
+        }
+
+        function tickCountdown() {
+            const remain = Math.max(0, Math.round((countdownEnds - Date.now()) / 1000));
+            countdown.classList.remove('expiring', 'expired');
+
+            if (remain === 0) {
+                countdown.textContent = 'Code expired — click "Pair another device" to get a new one.';
+                countdown.classList.add('expired');
+                copyBtn.disabled = true;
+                stopCountdown();
+                return;
+            }
+            if (remain <= 15) {
+                countdown.classList.add('expiring');
+                countdown.textContent = `Code expires in ${remain}s — enter it soon!`;
+            } else {
+                countdown.textContent = `Code expires in ${remain}s`;
+            }
+        }
+
+        function stopCountdown() {
+            if (countdownTimer) {
+                clearInterval(countdownTimer);
+                countdownTimer = null;
+            }
+        }
+
+        /* ---------- API ---------- */
+        async function requestPair(num, sessionId, secret) {
+            const headers = { 'Content-Type': 'application/json' };
+            if (secret) headers['x-pair-secret'] = secret;
+
+            const res = await fetch(PAIR_ENDPOINT, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ sessionId, num, secret })
+            });
+
+            const data = await safeJson(res);
+            return { res, data };
+        }
+
+        async function revokeSession(sessionId) {
+            if (!sessionId) return;
+            try {
+                const secret = secretInput.value.trim();
+                const headers = { 'Content-Type': 'application/json' };
+                if (secret) headers['x-pair-secret'] = secret;
+
+                await fetch(LOGOUT_ENDPOINT, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ sessionId, secret }),
+                    keepalive: true
+                });
+            } catch { /* best effort */ }
+        }
+
+        /* ---------- Main flow ---------- */
         pairBtn.addEventListener('click', async () => {
-            const num = phoneNumber.value.replace(/\D/g, '');
-            
+            const num = sanitizePhone(phoneInput.value);
+
             if (num.length < 10 || num.length > 15) {
-                showError("Please enter a valid number with country code.");
+                showError('Please enter a valid phone number with country code (10–15 digits).');
                 return;
             }
 
-            // Reset UI
-            errorBox.style.display = 'none';
-            pairBtn.disabled = true;
-            pairBtn.innerHTML = '<div class="spinner"></div> Generating...';
+            clearError();
+            setBusy(true);
 
-            // Generate a random session ID for this pairing
-            const sessionId = 'sess_' + Math.random().toString(36).slice(2, 10);
+            // Show "still waiting" hint if the request hangs.
+            slowWarnTimer = setTimeout(() => {
+                if (!pairBtn.disabled) return;
+                showError('Still waiting on WhatsApp… this can take 15–30 seconds.');
+            }, SLOW_WARNING_MS);
+
+            // Reuse existing sessionId for the same number, otherwise make a new one.
+            currentSessionId = getStoredSession(num) || generateSessionId();
+            storeSession(num, currentSessionId);
 
             try {
-                // Note: The URL is /api/pair to match the new index.js
-                const response = await fetch('/api/pair', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ sessionId, num })
-                });
+                let secret = secretInput.value.trim();
+                let { res, data } = await requestPair(num, currentSessionId, secret);
 
-                const data = await response.json();
-
-                // Check if the server returned an error
-                if (!response.ok || data.error) {
-                    throw new Error(data.error || "Failed to generate code");
+                // If server requires secret and we don't have it, reveal field & retry once.
+                if (res.status === 401 && !secret) {
+                    secretGroup.classList.remove('hidden');
+                    secretInput.focus();
+                    throw new Error('Server requires a pairing password. Please enter it and try again.');
                 }
 
-                // Show success view
-                formView.style.display = 'none';
-                successView.style.display = 'block';
-                pairingCode.textContent = data.code;
+                // If the cached session is stale, retry with a fresh one.
+                if (!res.ok && /not paired|capacity|invalid/i.test(data.error || '')) {
+                    const fresh = generateSessionId();
+                    currentSessionId = fresh;
+                    storeSession(num, fresh);
+                    ({ res, data } = await requestPair(num, fresh, secret));
+                }
+
+                if (!res.ok || data.error) {
+                    // 429 -> surface the cooldown message verbatim.
+                    throw new Error(data.error || `Request failed (${res.status})`);
+                }
+
+                if (!data.code) throw new Error('Server did not return a pairing code.');
+
+                // Success
+                codeDisplay.textContent = data.code;
+                copyBtn.disabled = false;
+                formView.classList.add('hidden');
+                successView.classList.add('visible');
+                startCountdown(CODE_EXPIRY_SECONDS);
 
             } catch (err) {
-                showError(err.message);
-                pairBtn.disabled = false;
-                pairBtn.innerHTML = 'Get Pairing Code';
+                showError(err.message || 'Something went wrong. Please try again.');
+                setBusy(false);
+            } finally {
+                if (slowWarnTimer) {
+                    clearTimeout(slowWarnTimer);
+                    slowWarnTimer = null;
+                }
             }
         });
 
-        resetBtn.addEventListener('click', () => {
-            phoneNumber.value = '';
-            formView.style.display = 'block';
-            successView.style.display = 'none';
-            pairBtn.disabled = false;
-            pairBtn.innerHTML = 'Get Pairing Code';
-            errorBox.style.display = 'none';
+        /* ---------- Copy button ---------- */
+        copyBtn.addEventListener('click', async () => {
+            const text = codeDisplay.textContent.replace(/\s+/g, '');
+            try {
+                await navigator.clipboard.writeText(text);
+                const old = copyBtn.textContent;
+                copyBtn.textContent = 'Copied!';
+                setTimeout(() => { copyBtn.textContent = old; }, 1500);
+            } catch {
+                // Fallback: select text
+                const range = document.createRange();
+                range.selectNodeContents(codeDisplay);
+                const sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+                showError('Press Ctrl/Cmd + C to copy the code.');
+            }
         });
 
-        function showError(msg) {
-            errorBox.textContent = msg;
-            errorBox.style.display = 'block';
-        }
+        /* ---------- Reset ---------- */
+        resetBtn.addEventListener('click', async () => {
+            stopCountdown();
 
-        // Allow pressing "Enter" to submit
-        phoneNumber.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') pairBtn.click();
+            // Revoke the current session server-side (best effort).
+            if (currentSessionId) await revokeSession(currentSessionId);
+            currentSessionId = null;
+            clearStoredSession();
+
+            phoneInput.value = '';
+            secretInput.value = '';
+            secretGroup.classList.add('hidden');
+            codeDisplay.textContent = '----';
+            countdown.textContent = '';
+            countdown.classList.remove('expiring', 'expired');
+            copyBtn.disabled = false;
+            clearError();
+
+            successView.classList.remove('visible');
+            formView.classList.remove('hidden');
+            setBusy(false);
+            phoneInput.focus();
         });
+
+        /* ---------- Phone input live-sanitize ---------- */
+        phoneInput.addEventListener('input', () => {
+            const cleaned = sanitizePhone(phoneInput.value);
+            if (cleaned !== phoneInput.value) {
+                const pos = phoneInput.selectionStart;
+                phoneInput.value = cleaned;
+                const newPos = Math.max(0, (pos ?? cleaned.length) - (phoneInput.value.length - cleaned.length));
+                try { phoneInput.setSelectionRange(newPos, newPos); } catch { /* ignore */ }
+            }
+        });
+
+        /* ---------- Enter to submit ---------- */
+        [phoneInput, secretInput].forEach(el => {
+            el.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (!pairBtn.disabled) pairBtn.click();
+                }
+            });
+        });
+
+        /* ---------- On load: prefill last number if any ---------- */
+        (function prefill() {
+            try {
+                const raw = localStorage.getItem(STORAGE_KEY);
+                if (!raw) return;
+                const parsed = JSON.parse(raw);
+                if (parsed && parsed.num) phoneInput.value = parsed.num;
+            } catch { /* ignore */ }
+        })();
     </script>
 </body>
 </html>
