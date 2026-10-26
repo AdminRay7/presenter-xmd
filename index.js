@@ -1,28 +1,18 @@
 require("dotenv").config();
 const dns = require("dns");
-const resolver = new dns.promises.Resolver();
-resolver.setServers(['8.8.8.8', '8.8.4.4']);
+dns.setServers(['8.8.8.8', '8.8.4.4']);
 
 // ============================================
 //   Silence Baileys' known log spam
 // ============================================
 const _origConsoleError = console.error.bind(console);
-const _origConsoleDebug = console.debug ? console.debug.bind(console) : console.log.bind(console);
 const _SILENCED_PATTERNS = ['Bad MAC', 'Bad RSA', 'Session error:Error: Bad MAC', 'unpadRandomMax16'];
 console.error = (...args) => {
-    if (typeof args[0] === 'string' && _SILENCED_PATTERNS.some(p => args[0].includes(p))) {
-        if (process.env.DEBUG_SILENCED) _origConsoleDebug(...args);
-        return;
+    for (const arg of args) {
+        if (typeof arg === 'string' && _SILENCED_PATTERNS.some(p => arg.includes(p))) return;
     }
     _origConsoleError(...args);
 };
-
-process.on('unhandledRejection', (err) => {
-    console.error('[unhandledRejection]', err?.stack || err);
-});
-process.on('uncaughtException', (err) => {
-    console.error('[uncaughtException]', err?.stack || err);
-});
 
 const makeWASocket = require("@whiskeysockets/baileys").default;
 const { Browsers, makeCacheableSignalKeyStore, fetchLatestWaWebVersion, DisconnectReason } = require("@whiskeysockets/baileys");
@@ -36,6 +26,7 @@ const https = require("https");
 const http = require("http");
 const fs = require("fs");
 
+// Try to load Mongoose (if you have database models)
 let mongoose;
 try {
     mongoose = require("mongoose");
@@ -45,13 +36,32 @@ try {
     console.log(chalk.yellow("⚠️ Mongoose or database models not found. Dashboard features limited."));
 }
 
+// Cache handler / presenter resolution once (avoids fs.existsSync per message)
+let _messageHandler = null;
+let _messageHandlerResolved = false;
+function getMessageHandler() {
+    if (_messageHandlerResolved) return _messageHandler;
+    _messageHandlerResolved = true;
+    try {
+        if (fs.existsSync("./handler.js")) {
+            _messageHandler = require("./handler");
+        } else {
+            _messageHandler = require("./presenter.js").presenter;
+        }
+    } catch (e) {
+        console.error(chalk.red(`[-] Failed to load message handler: ${e.message}`));
+        _messageHandler = null;
+    }
+    return _messageHandler;
+}
+
 // ============================================================
 //   WHATSAPP CONNECTION STRINGS
 // ============================================================
 const WA = {
     DB_URI: process.env.MONGO_URI,
-    DB_NAME: process.env.DB_NAME || "xmd303",
-    AUTH_COLLECTION: process.env.AUTH_COLLECTION || "authState",
+    DB_NAME: "xmd303",
+    AUTH_COLLECTION: "authState",
     BROWSER: Browsers.macOS("Safari"),
     SOCKET_OPTIONS: {
         syncFullHistory: false,
@@ -64,96 +74,99 @@ const WA = {
         fireInitQueries: false,
         emitOwnEvents: false
     },
-    PAIRING_TIMEOUT_MS: 45000, // Increased to prevent Heroku timeouts
-    PAIRING_POLL_MS: 500,
-    PAIRING_COOLDOWN_MS: 15000,
+    PAIRING_TIMEOUT_MS: 30000,
     RECONNECT_DELAY_MS: 5000,
-    RECONNECT_MAX_DELAY_MS: 60000,
-    MAX_SESSIONS: parseInt(process.env.MAX_SESSIONS || "12", 10),
-    SESSION_ID_REGEX: /^[a-zA-Z0-9_-]{1,64}$/
+    PAIR_COOLDOWN_MS: 60000,
+    MAX_SESSIONS: 12
 };
+
+const FALLBACK_WA_VERSION = [2, 3000, 1023223821];
 
 if (!WA.DB_URI) {
     console.error(chalk.red("❌ FATAL: MONGO_URI is missing from .env file!"));
     process.exit(1);
 }
 
+// ============================================================
+//   GLOBAL STATE
+// ============================================================
 global.sessions = new Map();
 global.mongoClient = null;
 global.__bootLocks = new Map();
 global.__pairCooldown = new Map();
 
-function escapeRegex(str) {
-    return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function isValidSessionId(id) {
-    return typeof id === 'string' && WA.SESSION_ID_REGEX.test(id);
-}
-
 let pairingQueue = Promise.resolve();
 function enqueuePairing(fn) {
-    const next = pairingQueue.then(() => fn(), () => fn());
+    const run = () => fn();
+    const next = pairingQueue.then(run, run);
     pairingQueue = next.catch(() => {});
     return next;
 }
 
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-
-let _mongoInitPromise = null;
-async function initMongo() {
-    if (!_mongoInitPromise) {
-        _mongoInitPromise = (async () => {
-            if (!global.mongoClient) {
-                global.mongoClient = new MongoClient(WA.DB_URI, { serverSelectionTimeoutMS: 15000 });
-                await global.mongoClient.connect();
-                console.log(chalk.green("✅ MongoDB connected"));
-            }
-            if (mongoose && mongoose.connection.readyState === 0) {
-                await mongoose.connect(WA.DB_URI, { dbName: WA.DB_NAME })
-                    .catch(e => console.error("Mongoose error:", e.message));
-            }
-            return global.mongoClient.db(WA.DB_NAME).collection(WA.AUTH_COLLECTION);
-        })().catch(e => { _mongoInitPromise = null; throw e; });
-    }
-    return _mongoInitPromise;
+function escapeRegex(str) {
+    return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function authCollection() {
+function toJid(input) {
+    if (!input || typeof input !== "string") return null;
+    if (input.includes("@")) return input;
+    const digits = input.replace(/\D/g, "");
+    if (digits.length < 10 || digits.length > 15) return null;
+    return digits + "@s.whatsapp.net";
+}
+
+// ============================================================
+//   MONGO INIT
+// ============================================================
+async function initMongo() {
+    if (!global.mongoClient) {
+        global.mongoClient = new MongoClient(WA.DB_URI, { serverSelectionTimeoutMS: 15000 });
+        await global.mongoClient.connect();
+        console.log(chalk.green("✅ MongoDB connected"));
+    }
+
+    if (mongoose && mongoose.connection.readyState === 0) {
+        await mongoose.connect(WA.DB_URI, { dbName: WA.DB_NAME }).catch(e => console.error("Mongoose error:", e.message));
+    }
+
     return global.mongoClient.db(WA.DB_NAME).collection(WA.AUTH_COLLECTION);
 }
 
+// ============================================================
+//   EMERGENCY SESSION CLEAR
+// ============================================================
 async function checkEmergencyClear() {
     const sessionToClear = process.env.CLEAR_SESSION;
-    if (!sessionToClear) return;
-
-    console.log(chalk.yellow(`[!] EMERGENCY CLEAR: Removing session ${sessionToClear}`));
-    try {
-        const live = global.sessions.get(sessionToClear);
-        if (live) {
-            live._paused = true;
-            try { live.conn?.ev.removeAllListeners(); } catch {}
-            try { live.conn?.ws?.close(); } catch {}
-            try { live.conn?.end(undefined); } catch {}
-            global.sessions.delete(sessionToClear);
+    if (sessionToClear) {
+        console.log(chalk.yellow(`[!] EMERGENCY CLEAR: Removing session ${sessionToClear}`));
+        try {
+            const collection = await initMongo();
+            const safeId = escapeRegex(sessionToClear);
+            const res = await collection.deleteMany({ _id: { $regex: `^${safeId}:` } });
+            console.log(chalk.green(`✅ Deleted ${res.deletedCount} documents for ${sessionToClear}`));
+            console.log(chalk.yellow(`⚠️ REMINDER: Please remove CLEAR_SESSION from Heroku Config Vars!`));
+        } catch (e) {
+            console.error("Failed to clear session:", e.message);
         }
-
-        await initMongo();
-        const safeId = escapeRegex(sessionToClear);
-        const res = await authCollection().deleteMany({ _id: { $regex: `^${safeId}:` } });
-        console.log(chalk.green(`✅ Deleted ${res.deletedCount} documents for ${sessionToClear}`));
-    } catch (e) {
-        console.error("Failed to clear session:", e.message);
     }
 }
+
+// ============================================================
+//   LIVE FEED CAPTURE
+// ============================================================
+const SKIP_CAPTURE_TYPES = new Set([
+    "protocolMessage",
+    "messageContextInfo",
+    "reactionMessage",
+    "senderKeyDistributionMessage"
+]);
 
 async function captureIncomingMedia(conn, msg, sessionId) {
     try {
         if (!global.models?.LiveEvent) return;
-        if (!msg?.key) return;
 
-        const from = msg.key.remoteJid;
-        if (!from || from.endsWith("@newsletter") || from === "status@broadcast") return;
+        const from = msg.key?.remoteJid;
+        if (!from || from.endsWith("@newsletter")) return;
 
         let inner = msg.message || {};
         let guard = 0;
@@ -165,35 +178,34 @@ async function captureIncomingMedia(conn, msg, sessionId) {
             break;
         }
 
-        const type = Object.keys(inner)[0];
+        // FIX: pick first non-infrastructure key instead of blindly [0]
+        const type = Object.keys(inner).find(k => !SKIP_CAPTURE_TYPES.has(k));
         if (!type) return;
-        if (["protocolMessage", "messageContextInfo", "reactionMessage"].includes(type)) return;
 
-        const text = inner.conversation || inner.extendedTextMessage?.text || inner.imageMessage?.caption || inner.videoMessage?.caption || "";
+        let text = inner.conversation
+            || inner.extendedTextMessage?.text
+            || inner.imageMessage?.caption
+            || inner.videoMessage?.caption
+            || "";
 
         await global.models.LiveEvent.create({
             sessionId,
             type: "message",
             chatJid: from,
             senderJid: msg.key.participant || from,
-            senderName: msg.pushName || String(from).split("@")[0],
+            senderName: msg.pushName || from.split("@")[0],
             fromMe: false,
             text: text || `[${type}]`,
             timestamp: new Date()
         });
-    } catch (e) {}
+    } catch (e) {
+        // Ignore capture errors to prevent crashes
+    }
 }
 
-function teardownSocket(session) {
-    if (!session) return;
-    session.socketReady = false;
-    session.connecting = false;
-    try { session.conn?.ev.removeAllListeners(); } catch {}
-    try { session.conn?.ws?.close(); } catch {}
-    try { session.conn?.end(undefined); } catch {}
-    session.conn = null;
-}
-
+// ============================================================
+//   SOCKET BOOT
+// ============================================================
 async function bootSocket(sessionId, session) {
     if (global.__bootLocks.has(sessionId)) {
         return global.__bootLocks.get(sessionId);
@@ -201,21 +213,30 @@ async function bootSocket(sessionId, session) {
 
     const p = (async () => {
         session.id = sessionId;
+        if (session._paused === undefined) session._paused = false;
 
-        if (session.conn) teardownSocket(session);
+        if (session.conn) {
+            try {
+                session.conn.ev.removeAllListeners();
+                session.conn.ws?.close();
+            } catch {}
+            session.conn = null;
+            session.socketReady = false;
+        }
 
         const collection = await initMongo();
         const { state, saveCreds } = await useMongoDBAuthState(collection, sessionId);
 
-        let version;
+        // FIX: fetchLatestWaWebVersion returns array in 6.x, object in some builds
+        let version = FALLBACK_WA_VERSION;
         try {
-            ({ version } = await fetchLatestWaWebVersion());
-        } catch (e) {
-            version = null;
-        }
-        if (!Array.isArray(version) || version.length !== 3) {
-            version = [2, 3000, 1023223821];
-            console.warn(chalk.yellow(`[${sessionId}] using fallback WA version ${JSON.stringify(version)}`));
+            const result = await fetchLatestWaWebVersion();
+            const candidate = Array.isArray(result) ? result : result?.version;
+            if (Array.isArray(candidate) && candidate.length >= 3) {
+                version = candidate;
+            }
+        } catch {
+            version = FALLBACK_WA_VERSION;
         }
 
         console.log(chalk.cyan(`[${sessionId}] WA version: ${JSON.stringify(version)}`));
@@ -232,101 +253,87 @@ async function bootSocket(sessionId, session) {
         });
 
         session.conn = conn;
-        session.connecting = true;
         conn.ev.on("creds.update", saveCreds);
 
         conn.ev.on("connection.update", async (update) => {
-            try {
-                const { connection, lastDisconnect } = update;
+            const { connection, lastDisconnect } = update;
 
-                if (connection === "connecting") {
-                    session.connecting = true;
-                    console.log(chalk.cyan(`🔌 [${sessionId}] connecting...`));
-                }
+            if (connection === "connecting") {
+                session.socketReady = true;
+                console.log(chalk.cyan(`🔌 [${sessionId}] socket ready`));
+            }
 
-                if (connection === "open") {
-                    session.socketReady = true;
-                    session.connecting = false;
-                    session.pairing = null;
-                    session.pairingNumber = null;
-                    session.reconnectAttempts = 0;
-                    console.log(chalk.green(`✅ [${sessionId}] connected as ${conn.user?.id}`));
+            if (connection === "open") {
+                session.socketReady = true;
+                session.pairing = null;
+                session.pairingNumber = null;
+                console.log(chalk.green(`✅ [${sessionId}] connected as ${conn.user?.id}`));
 
+                try {
+                    await collection.updateOne(
+                        { _id: `${sessionId}:meta` },
+                        { $set: { value: { jid: conn.user?.id, linkedAt: Date.now() } } },
+                        { upsert: true }
+                    );
+                } catch {}
+
+                if (global.models?.SessionSettings) {
                     try {
-                        await collection.updateOne(
-                            { _id: `${sessionId}:meta` },
-                            { $set: { value: { jid: conn.user?.id, linkedAt: Date.now() } } },
-                            { upsert: true }
-                        );
-                    } catch (e) {}
-
-                    if (global.models?.SessionSettings) {
-                        try {
-                            const realPhone = conn.user?.id?.split(":")[0]?.split("@")[0] || null;
-                            if (realPhone) {
-                                await global.models.SessionSettings.updateOne(
-                                    { sessionId },
-                                    { $set: { phoneNumber: realPhone } },
-                                    { upsert: true }
-                                );
-                            }
-                        } catch (e) {}
+                        const realPhone = conn.user?.id?.split(":")[0]?.split("@")[0] || null;
+                        if (realPhone) {
+                            await global.models.SessionSettings.updateOne(
+                                { sessionId },
+                                { $set: { phoneNumber: realPhone } },
+                                { upsert: true }
+                            );
+                        }
+                    } catch (e) {
+                        console.error(`[${sessionId}] phone save error:`, e.message);
                     }
                 }
+            }
 
-                if (connection === "close") {
-                    session.socketReady = false;
-                    session.connecting = false;
-                    const code = lastDisconnect?.error?.output?.statusCode;
-                    console.log(chalk.red(`❌ [${sessionId}] closed (${code})`));
+            if (connection === "close") {
+                session.socketReady = false;
+                session.pairing = null;
+                session.pairingNumber = null;
+                const code = lastDisconnect?.error?.output?.statusCode;
+                console.log(chalk.red(`❌ [${sessionId}] closed (${code})`));
 
-                    if (session._paused) {
-                        teardownSocket(session);
-                        return;
-                    }
+                if (session._paused) return;
 
-                    // ONLY clear credentials on actual LOGOUT or BAN (401), NOT timeouts (408/428)
-                    if (code === 401 || code === DisconnectReason.loggedOut) {
-                        console.log(chalk.red(`🛑 [${sessionId}] Logged out. Clearing session.`));
-                        session._paused = true;
-                        teardownSocket(session);
-                        await logoutSession(sessionId);
-                        return;
-                    }
-
-                    if (code === 440) {
-                        global.sessions.delete(sessionId);
-                        teardownSocket(session);
-                        return;
-                    }
-
-                    const attempts = (session.reconnectAttempts = (session.reconnectAttempts || 0) + 1);
-                    const delay = Math.min(WA.RECONNECT_DELAY_MS * Math.pow(2, attempts - 1), WA.RECONNECT_MAX_DELAY_MS);
-                    
-                    session.reconnectTimer = setTimeout(() => {
-                        session.reconnectTimer = null;
-                        if (!global.sessions.has(sessionId)) return;
-                        if (session._paused) return;
-                        bootSocket(sessionId, session).catch(e => console.error(`Reconnect ${sessionId}:`, e.message));
-                    }, delay);
+                if (code === 401 || code === 428 || code === DisconnectReason.loggedOut) {
+                    console.log(chalk.red(`🛑 [${sessionId}] Blocked or logged out. Clearing session.`));
+                    await logoutSession(sessionId);
+                    return;
                 }
-            } catch (e) {
-                console.error(`[${sessionId}] connection.update handler error:`, e);
+                if (code === 440) {
+                    console.log(chalk.yellow(`⚠️ [${sessionId}] Conflict (440) — another instance is using this session.`));
+                    global.sessions.delete(sessionId);
+                    return;
+                }
+
+                setTimeout(() => {
+                    if (!global.sessions.has(sessionId)) return;
+                    if (session._paused) return;
+                    bootSocket(sessionId, session).catch(e => console.error(`Reconnect ${sessionId}:`, e.message));
+                }, WA.RECONNECT_DELAY_MS);
             }
         });
 
         conn.ev.on("messages.upsert", async (m) => {
             try {
-                const first = m?.messages?.[0];
-                if (first && !first.key?.fromMe) {
-                    captureIncomingMedia(conn, first, sessionId).catch(() => {});
+                // FIX: iterate all messages, not just [0]
+                for (const msg of m.messages || []) {
+                    if (!msg.key?.fromMe) {
+                        await captureIncomingMedia(conn, msg, sessionId);
+                    }
                 }
 
-                if (fs.existsSync("./handler.js")) {
-                    await require("./handler")(conn, m, sessionId);
-                } else {
-                    const { presenter } = require("./presenter.js");
-                    await presenter(conn, m);
+                // FIX: cached handler lookup instead of fs.existsSync per message
+                const handler = getMessageHandler();
+                if (handler) {
+                    await handler(conn, m, sessionId);
                 }
             } catch (err) {
                 console.error(`[${sessionId}] message error:`, err);
@@ -337,120 +344,127 @@ async function bootSocket(sessionId, session) {
     })();
 
     global.__bootLocks.set(sessionId, p);
-    p.catch(() => {}).finally(() => global.__bootLocks.delete(sessionId));
+    p.finally(() => global.__bootLocks.delete(sessionId));
     return p;
 }
 
+// ============================================================
+//   PAIRING CODE PATH
+// ============================================================
 async function requestPairingCodeForSession(sessionId, phoneNumber) {
-    if (!isValidSessionId(sessionId)) throw new Error("Invalid sessionId");
-    if (!phoneNumber || typeof phoneNumber !== "string" || phoneNumber.length < 10 || phoneNumber.length > 15) {
-        throw new Error("Invalid phone number");
-    }
-
-    const last = global.__pairCooldown.get(phoneNumber) || 0;
-    if (Date.now() - last < WA.PAIRING_COOLDOWN_MS) {
-        const wait = Math.ceil((WA.PAIRING_COOLDOWN_MS - (Date.now() - last)) / 1000);
-        throw new Error(`Please wait ${wait}s before requesting another code for this number`);
-    }
-
     return enqueuePairing(async () => {
         await initMongo();
 
         let session = global.sessions.get(sessionId);
         if (session?.conn?.user) throw new Error("Session already paired");
+        if (session?.pairing && session.pairingNumber === phoneNumber) return session.pairing;
 
         if (!session) {
-            if (global.sessions.size >= WA.MAX_SESSIONS) throw new Error(`Server at capacity (${WA.MAX_SESSIONS})`);
-            session = { conn: null, socketReady: false, connecting: false, pairing: null, pairingNumber: null, startedAt: Date.now(), _paused: false };
+            if (global.sessions.size >= WA.MAX_SESSIONS) {
+                throw new Error(`Server at capacity (${WA.MAX_SESSIONS})`);
+            }
+            session = {
+                conn: null,
+                socketReady: false,
+                pairing: null,
+                pairingNumber: null,
+                startedAt: Date.now(),
+                welcomed: false,
+                _paused: false
+            };
             global.sessions.set(sessionId, session);
             await bootSocket(sessionId, session);
         } else if (!session.conn) {
-            session._paused = false;
             await bootSocket(sessionId, session);
-        } else if (session.pairing && session.pairingNumber === phoneNumber) {
-            return session.pairing;
         }
 
-        // Wait for Baileys to open the WebSocket connection phase
         const deadline = Date.now() + WA.PAIRING_TIMEOUT_MS;
-        while ((!session.conn || (!session.connecting && !session.socketReady)) && Date.now() < deadline) {
-            if (!global.sessions.has(sessionId)) throw new Error("Session closed");
-            await sleep(WA.PAIRING_POLL_MS);
+        while (!session.socketReady && Date.now() < deadline) {
+            await new Promise(r => setTimeout(r, 500));
         }
-        
-        if (!session.conn || (!session.connecting && !session.socketReady)) {
-            throw new Error("Socket not ready, please check server connection");
-        }
+        if (!session.socketReady) throw new Error("Socket not ready, try again");
 
         let code;
         try {
-            // Baileys requires this to be called while the socket is connecting
             code = await session.conn.requestPairingCode(phoneNumber);
-        } catch (firstErr) {
-            await sleep(2000);
-            try {
-                code = await session.conn.requestPairingCode(phoneNumber);
-            } catch (secondErr) {
-                throw new Error(`Pairing failed: ${secondErr.message || firstErr.message}`);
-            }
+        } catch {
+            await new Promise(r => setTimeout(r, 2000));
+            code = await session.conn.requestPairingCode(phoneNumber);
         }
 
-        const formatted = String(code).match(/.{1,4}/g)?.join("-") || code;
+        const formatted = code.match(/.{1,4}/g)?.join("-") || code;
         session.pairing = formatted;
         session.pairingNumber = phoneNumber;
-        global.__pairCooldown.set(phoneNumber, Date.now());
         console.log(chalk.green(`✅ [${sessionId}] pairing code: ${formatted}`));
         return formatted;
     });
 }
 
+// ============================================================
+//   LOGOUT
+// ============================================================
 async function logoutSession(sessionId) {
     const s = global.sessions.get(sessionId);
     if (s) {
-        s._paused = true;
-        if (s.reconnectTimer) clearTimeout(s.reconnectTimer);
-        teardownSocket(s);
+        try {
+            s._paused = true;
+            s.conn?.ev.removeAllListeners();
+            s.conn?.ws?.close();
+        } catch {}
         global.sessions.delete(sessionId);
     }
+    // FIX: cleanup cooldown/bootlock maps
+    global.__pairCooldown.delete(sessionId);
+    global.__bootLocks.delete(sessionId);
     try {
-        await initMongo();
+        const collection = await initMongo();
         const safeId = escapeRegex(sessionId);
-        await authCollection().deleteMany({ _id: { $regex: `^${safeId}:` } });
-    } catch (e) {
-        console.error(`[${sessionId}] logout cleanup error:`, e.message);
-    }
+        await collection.deleteMany({ _id: { $regex: `^${safeId}:` } });
+    } catch {}
 }
 
+// ============================================================
+//   RESUME ALL SESSIONS
+// ============================================================
 async function resumeAllSessions() {
     const collection = await initMongo();
     const metas = await collection.find({ _id: { $regex: ":meta$" } }).toArray();
     console.log(chalk.cyan(`🔄 Resuming ${metas.length} session(s)...`));
 
     for (const meta of metas) {
-        const sessionId = String(meta._id).replace(/:meta$/, "");
-        if (!isValidSessionId(sessionId)) continue;
+        const sessionId = meta._id.replace(/:meta$/, "");
         if (global.sessions.has(sessionId)) continue;
-        if (global.sessions.size >= WA.MAX_SESSIONS) {
-            console.warn(chalk.yellow(`⚠️ Skipping ${sessionId}: max sessions (${WA.MAX_SESSIONS}) reached`));
-            continue;
-        }
+        if (global.sessions.size >= WA.MAX_SESSIONS) break;
 
-        const session = { conn: null, socketReady: false, connecting: false, pairing: null, pairingNumber: null, startedAt: Date.now(), _paused: false };
+        const session = {
+            conn: null,
+            socketReady: false,
+            pairing: null,
+            pairingNumber: null,
+            startedAt: Date.now(),
+            welcomed: false,
+            _paused: false
+        };
         global.sessions.set(sessionId, session);
         try {
             await bootSocket(sessionId, session);
         } catch (e) {
             console.error(`Resume ${sessionId}:`, e.message);
         }
-        await sleep(1500);
+        await new Promise(r => setTimeout(r, 1500));
     }
 }
 
+// ============================================================
+//   EXPRESS SERVER SETUP
+// ============================================================
 const app = express();
-app.disable('x-powered-by');
 app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: true }));
+app.use(express.static(path.join(__dirname, 'public')));
+app.use("/Assets", express.static(path.join(__dirname, "Assets")));
 
+// Health Check
 app.get("/health", (_req, res) => {
     res.json({ ok: true, sessions: global.sessions.size, uptime: process.uptime() });
 });
@@ -464,31 +478,34 @@ app.get("/api/status", (_req, res) => {
 app.get("/api/stats", async (_req, res) => {
     try {
         let users = 0;
-        if (global.models?.Account) users = await global.models.Account.countDocuments();
+        if (global.models?.Account) {
+            users = await global.models.Account.countDocuments();
+        }
         let active = 0;
         for (const [, s] of global.sessions) if (s.conn?.user) active++;
         res.json({ accounts: users, totalSessions: global.sessions.size, activeSessions: active });
-    } catch {
-        res.json({ accounts: 0, totalSessions: 0, activeSessions: 0 });
+    } catch (e) {
+        console.error("stats error:", e.message);
+        res.json({ accounts: 0, totalSessions: global.sessions.size, activeSessions: 0 });
     }
 });
 
-function requirePairSecret(req, res, next) {
-    const expected = process.env.PAIR_SECRET;
-    if (!expected) return next();
-    const provided = req.headers["x-pair-secret"] || req.body?.secret;
-    if (provided !== expected) return res.status(401).json({ error: "Unauthorized" });
-    next();
-}
-
-app.post(["/api/pair", "/pair"], requirePairSecret, async (req, res) => {
-    const rawSessionId = req.body?.sessionId;
-    const sessionId = rawSessionId ? String(rawSessionId).trim() : "sess_" + Math.random().toString(36).slice(2, 10);
-
-    if (!isValidSessionId(sessionId)) return res.status(400).json({ error: "Invalid sessionId" });
-
+// FIX: rate-limit /pair using __pairCooldown
+app.post(["/api/pair", "/pair"], async (req, res) => {
+    const sessionId = String(req.body?.sessionId || "sess_" + Math.random().toString(36).slice(2, 8)).trim();
     const num = String(req.body?.num || "").replace(/\D/g, "");
-    if (!num || num.length < 10 || num.length > 15) return res.status(400).json({ error: "Invalid phone number" });
+
+    if (!num || num.length < 10 || num.length > 15) {
+        return res.status(400).json({ error: "Invalid phone number" });
+    }
+
+    const now = Date.now();
+    const last = global.__pairCooldown.get(num) || 0;
+    if (now - last < WA.PAIR_COOLDOWN_MS) {
+        const wait = Math.ceil((WA.PAIR_COOLDOWN_MS - (now - last)) / 1000);
+        return res.status(429).json({ error: `Please wait ${wait}s before requesting another code` });
+    }
+    global.__pairCooldown.set(num, now);
 
     try {
         const code = await requestPairingCodeForSession(sessionId, num);
@@ -498,33 +515,23 @@ app.post(["/api/pair", "/pair"], requirePairSecret, async (req, res) => {
                 { sessionId },
                 { $set: { phoneNumber: num, updatedAt: new Date() } },
                 { upsert: true }
-            ).catch(e => console.error(`[${sessionId}] SessionSettings save error:`, e.message));
+            );
         }
 
         res.json({ success: true, sessionId, code });
     } catch (error) {
-        console.error(`[pair:${sessionId}]`, error.message);
+        console.error(error);
         res.status(500).json({ error: error.message });
     }
 });
 
-app.post(["/api/logout", "/logout"], requirePairSecret, async (req, res) => {
-    const sessionId = String(req.body?.sessionId || "").trim();
-    if (!isValidSessionId(sessionId)) return res.status(400).json({ error: "Invalid sessionId" });
-    try {
-        await logoutSession(sessionId);
-        res.json({ success: true });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-app.use(express.static(path.join(__dirname, "public")));
-app.use("/Assets", express.static(path.join(__dirname, "Assets")));
-
+// ============================================================
+//   LAUNCH SERVER
+// ============================================================
 const PORT = process.env.PORT || 3000;
-const server = app.listen(PORT, "0.0.0.0", async () => {
+const server = app.listen(PORT, '0.0.0.0', async () => {
     console.log(chalk.cyan(`[+] Web Dashboard running on port ${PORT}`));
+
     try {
         await initMongo();
         await checkEmergencyClear();
@@ -534,43 +541,39 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
     }
 });
 
-let keepAliveTimer = null;
-let shuttingDown = false;
+// ============================================================
+//   GRACEFUL SHUTDOWN & KEEP-ALIVE
+// ============================================================
+const appName = process.env.HEROKU_APP_NAME || "lastkey";
+let keepAliveInterval = null;
+
+if (process.env.BASE_URL || process.env.HEROKU_APP_NAME) {
+    const selfUrl = process.env.BASE_URL || `https://${appName}.herokuapp.com`;
+    const client = selfUrl.startsWith('https:') ? https : http;
+
+    keepAliveInterval = setInterval(() => {
+        const req = client.get(`${selfUrl}/health`, (res) => {
+            res.on('data', () => {});
+            res.on('end', () => {});
+        });
+        req.on('error', () => {});
+        req.setTimeout(15000, () => req.destroy());
+    }, 10 * 60 * 1000);
+}
 
 async function shutdown(signal) {
-    if (shuttingDown) return;
-    shuttingDown = true;
     console.log(chalk.yellow(`\n[!] ${signal} received, shutting down...`));
-
-    if (keepAliveTimer) clearInterval(keepAliveTimer);
-    try { server.close(); } catch {}
-
-    for (const [, sess] of global.sessions) {
-        sess._paused = true;
-        if (sess.reconnectTimer) clearTimeout(sess.reconnectTimer);
-        teardownSocket(sess);
+    if (keepAliveInterval) {
+        clearInterval(keepAliveInterval);
+        keepAliveInterval = null;
     }
-    global.sessions.clear();
-
+    await new Promise(r => server.close(r));
+    for (const [, sess] of global.sessions) {
+        try { sess.conn?.end(undefined); } catch {}
+    }
     try { await global.mongoClient?.close(); } catch {}
     if (mongoose) await mongoose.disconnect().catch(() => {});
     process.exit(0);
 }
-
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
-
-if (process.env.BASE_URL || process.env.HEROKU_APP_NAME) {
-    const appName = process.env.HEROKU_APP_NAME || "lastkey";
-    const selfUrl = process.env.BASE_URL || `https://${appName}.herokuapp.com`;
-    const client = selfUrl.startsWith("https:") ? https : http;
-
-    keepAliveTimer = setInterval(() => {
-        const req = client.get(`${selfUrl}/health`, (res) => {
-            res.on("data", () => {});
-            res.on("end", () => {});
-        });
-        req.on("error", () => {});
-        req.setTimeout(15000, () => req.destroy());
-    }, 10 * 60 * 1000);
-}
