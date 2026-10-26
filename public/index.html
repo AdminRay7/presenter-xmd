@@ -251,7 +251,6 @@
             display: none !important;
         }
 
-        /* Small screens */
         @media (max-width: 360px) {
             .container {
                 padding: 28px 20px;
@@ -339,33 +338,44 @@
     <script>
         'use strict';
 
-        /* ---------- Config ---------- */
-        const PAIR_ENDPOINT       = '/api/pair';
-        const LOGOUT_ENDPOINT     = '/api/logout';
-        const CODE_EXPIRY_SECONDS = 60;
-        const SLOW_WARNING_MS     = 15000;
-        const STORAGE_KEY         = 'xmd_pair_session';
+        /* ============================================================
+           CONFIG
+           ============================================================ */
+        const PAIR_ENDPOINT        = '/api/pair';
+        const LOGOUT_ENDPOINT      = '/api/logout';
+        const CODE_EXPIRY_SECONDS  = 60;
+        const SLOW_WARNING_MS      = 15000;
+        const FETCH_TIMEOUT_MS     = 60000;
+        const REVOKE_TIMEOUT_MS    = 5000;
+        const STORAGE_KEY          = 'xmd_pair_session';
 
-        /* ---------- DOM ---------- */
-        const pairBtn    = document.getElementById('pairBtn');
-        const phoneInput = document.getElementById('phoneNumber');
+        /* ============================================================
+           DOM
+           ============================================================ */
+        const pairBtn     = document.getElementById('pairBtn');
+        const phoneInput  = document.getElementById('phoneNumber');
         const secretInput = document.getElementById('pairSecret');
         const secretGroup = document.getElementById('secret-group');
-        const errorBox   = document.getElementById('errorBox');
-        const formView   = document.getElementById('form-view');
+        const errorBox    = document.getElementById('errorBox');
+        const formView    = document.getElementById('form-view');
         const successView = document.getElementById('success-view');
         const codeDisplay = document.getElementById('pairingCode');
-        const copyBtn    = document.getElementById('copyBtn');
-        const resetBtn   = document.getElementById('resetBtn');
-        const countdown  = document.getElementById('countdown');
+        const copyBtn     = document.getElementById('copyBtn');
+        const resetBtn    = document.getElementById('resetBtn');
+        const countdown   = document.getElementById('countdown');
 
-        /* ---------- State ---------- */
+        /* ============================================================
+           STATE
+           ============================================================ */
         let currentSessionId = null;
         let slowWarnTimer    = null;
         let countdownTimer   = null;
         let countdownEnds    = 0;
+        let inFlight         = false;
 
-        /* ---------- Helpers ---------- */
+        /* ============================================================
+           HELPERS
+           ============================================================ */
         function showError(msg) {
             errorBox.textContent = msg;
             errorBox.classList.add('visible');
@@ -377,11 +387,19 @@
         }
 
         function setBusy(busy, text = 'Get Pairing Code') {
+            inFlight = busy;
             pairBtn.disabled = busy;
             pairBtn.setAttribute('aria-busy', busy ? 'true' : 'false');
-            pairBtn.innerHTML = busy
-                ? '<div class="spinner"></div> Generating...'
-                : text;
+            // Rebuild content safely (no user strings are inserted here)
+            pairBtn.textContent = '';
+            if (busy) {
+                const spinner = document.createElement('div');
+                spinner.className = 'spinner';
+                pairBtn.appendChild(spinner);
+                pairBtn.appendChild(document.createTextNode(' Generating...'));
+            } else {
+                pairBtn.textContent = text;
+            }
         }
 
         function sanitizePhone(raw) {
@@ -389,6 +407,7 @@
         }
 
         function generateSessionId() {
+            // 12 base36 chars from two random sources -> ~62 bits entropy
             const rand = (Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)).slice(0, 12);
             return 'sess_' + rand;
         }
@@ -398,14 +417,18 @@
                 const raw = localStorage.getItem(STORAGE_KEY);
                 if (!raw) return null;
                 const parsed = JSON.parse(raw);
-                if (parsed && parsed.num === num && parsed.sessionId) return parsed.sessionId;
+                if (parsed && parsed.num === num && parsed.sessionId) {
+                    return { sessionId: parsed.sessionId, secret: parsed.secret || '' };
+                }
             } catch { /* ignore */ }
             return null;
         }
 
-        function storeSession(num, sessionId) {
+        function storeSession(num, sessionId, secret) {
             try {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify({ num, sessionId, at: Date.now() }));
+                localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                    num, sessionId, secret: secret || '', at: Date.now()
+                }));
             } catch { /* quota — non-fatal */ }
         }
 
@@ -419,7 +442,9 @@
             catch { return { error: text || `HTTP ${res.status}` }; }
         }
 
-        /* ---------- Countdown ---------- */
+        /* ============================================================
+           COUNTDOWN
+           ============================================================ */
         function startCountdown(seconds) {
             stopCountdown();
             countdownEnds = Date.now() + seconds * 1000;
@@ -453,12 +478,24 @@
             }
         }
 
-        /* ---------- API ---------- */
+        /* ============================================================
+           API — fetch with timeout
+           ============================================================ */
+        async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+            try {
+                return await fetch(url, { ...options, signal: controller.signal });
+            } finally {
+                clearTimeout(timeoutId);
+            }
+        }
+
         async function requestPair(num, sessionId, secret) {
             const headers = { 'Content-Type': 'application/json' };
             if (secret) headers['x-pair-secret'] = secret;
 
-            const res = await fetch(PAIR_ENDPOINT, {
+            const res = await fetchWithTimeout(PAIR_ENDPOINT, {
                 method: 'POST',
                 headers,
                 body: JSON.stringify({ sessionId, num, secret })
@@ -468,24 +505,27 @@
             return { res, data };
         }
 
-        async function revokeSession(sessionId) {
+        async function revokeSession(sessionId, secret) {
             if (!sessionId) return;
             try {
-                const secret = secretInput.value.trim();
                 const headers = { 'Content-Type': 'application/json' };
                 if (secret) headers['x-pair-secret'] = secret;
 
-                await fetch(LOGOUT_ENDPOINT, {
+                await fetchWithTimeout(LOGOUT_ENDPOINT, {
                     method: 'POST',
                     headers,
                     body: JSON.stringify({ sessionId, secret }),
                     keepalive: true
-                });
+                }, REVOKE_TIMEOUT_MS);
             } catch { /* best effort */ }
         }
 
-        /* ---------- Main flow ---------- */
+        /* ============================================================
+           MAIN — pair click
+           ============================================================ */
         pairBtn.addEventListener('click', async () => {
+            if (inFlight) return; // hard guard against double-submit
+
             const num = sanitizePhone(phoneInput.value);
 
             if (num.length < 10 || num.length > 15) {
@@ -498,39 +538,45 @@
 
             // Show "still waiting" hint if the request hangs.
             slowWarnTimer = setTimeout(() => {
-                if (!pairBtn.disabled) return;
+                if (!inFlight) return;
                 showError('Still waiting on WhatsApp… this can take 15–30 seconds.');
             }, SLOW_WARNING_MS);
 
-            // Reuse existing sessionId for the same number, otherwise make a new one.
-            currentSessionId = getStoredSession(num) || generateSessionId();
-            storeSession(num, currentSessionId);
+            // Reuse stored session for this number if any, else new.
+            const stored = getStoredSession(num);
+            currentSessionId = stored?.sessionId || generateSessionId();
+            const storedSecret = stored?.secret || '';
 
             try {
-                let secret = secretInput.value.trim();
+                let secret = secretInput.value.trim() || storedSecret;
+
                 let { res, data } = await requestPair(num, currentSessionId, secret);
 
-                // If server requires secret and we don't have it, reveal field & retry once.
-                if (res.status === 401 && !secret) {
+                // Server requires secret we don't have -> reveal field & prompt.
+                if (res.status === 401 && !secretInput.value.trim()) {
                     secretGroup.classList.remove('hidden');
                     secretInput.focus();
                     throw new Error('Server requires a pairing password. Please enter it and try again.');
                 }
 
-                // If the cached session is stale, retry with a fresh one.
-                if (!res.ok && /not paired|capacity|invalid/i.test(data.error || '')) {
+                // Stale session or transient error -> retry once with a fresh session.
+                if (!res.ok && /already paired|not paired|capacity|invalid|not ready/i.test(data.error || '')) {
                     const fresh = generateSessionId();
                     currentSessionId = fresh;
-                    storeSession(num, fresh);
+                    storeSession(num, fresh, secret);
                     ({ res, data } = await requestPair(num, fresh, secret));
                 }
 
                 if (!res.ok || data.error) {
-                    // 429 -> surface the cooldown message verbatim.
                     throw new Error(data.error || `Request failed (${res.status})`);
                 }
+                if (!data.code) {
+                    throw new Error('Server did not return a pairing code.');
+                }
 
-                if (!data.code) throw new Error('Server did not return a pairing code.');
+                // Persist secret alongside session (so logout/revoke can use it later).
+                storeSession(num, currentSessionId, secret);
+                currentSessionId = data.sessionId || currentSessionId;
 
                 // Success
                 codeDisplay.textContent = data.code;
@@ -540,17 +586,24 @@
                 startCountdown(CODE_EXPIRY_SECONDS);
 
             } catch (err) {
-                showError(err.message || 'Something went wrong. Please try again.');
-                setBusy(false);
+                if (err && err.name === 'AbortError') {
+                    showError('Request timed out — please try again.');
+                } else {
+                    showError(err.message || 'Something went wrong. Please try again.');
+                }
             } finally {
                 if (slowWarnTimer) {
                     clearTimeout(slowWarnTimer);
                     slowWarnTimer = null;
                 }
+                // FIX: always reset button — safe because form is hidden on success.
+                setBusy(false);
             }
         });
 
-        /* ---------- Copy button ---------- */
+        /* ============================================================
+           COPY BUTTON
+           ============================================================ */
         copyBtn.addEventListener('click', async () => {
             const text = codeDisplay.textContent.replace(/\s+/g, '');
             try {
@@ -559,22 +612,31 @@
                 copyBtn.textContent = 'Copied!';
                 setTimeout(() => { copyBtn.textContent = old; }, 1500);
             } catch {
-                // Fallback: select text
+                // Fallback: select the code text
                 const range = document.createRange();
                 range.selectNodeContents(codeDisplay);
                 const sel = window.getSelection();
                 sel.removeAllRanges();
                 sel.addRange(range);
-                showError('Press Ctrl/Cmd + C to copy the code.');
+                showError('Could not copy automatically. Long-press the code to select it, then copy.');
             }
         });
 
-        /* ---------- Reset ---------- */
+        /* ============================================================
+           RESET
+           ============================================================ */
         resetBtn.addEventListener('click', async () => {
             stopCountdown();
 
-            // Revoke the current session server-side (best effort).
-            if (currentSessionId) await revokeSession(currentSessionId);
+            // Fire-and-forget revoke (don't block UI on a hung fetch).
+            const num = sanitizePhone(phoneInput.value);
+            const stored = getStoredSession(num);
+            const sessionToRevoke = currentSessionId || stored?.sessionId || null;
+            const secretToRevoke = secretInput.value.trim() || stored?.secret || '';
+            if (sessionToRevoke) {
+                revokeSession(sessionToRevoke, secretToRevoke).catch(() => {});
+            }
+
             currentSessionId = null;
             clearStoredSession();
 
@@ -593,18 +655,30 @@
             phoneInput.focus();
         });
 
-        /* ---------- Phone input live-sanitize ---------- */
+        /* ============================================================
+           PHONE INPUT — caret-preserving sanitize
+           ============================================================ */
         phoneInput.addEventListener('input', () => {
-            const cleaned = sanitizePhone(phoneInput.value);
-            if (cleaned !== phoneInput.value) {
-                const pos = phoneInput.selectionStart;
-                phoneInput.value = cleaned;
-                const newPos = Math.max(0, (pos ?? cleaned.length) - (phoneInput.value.length - cleaned.length));
-                try { phoneInput.setSelectionRange(newPos, newPos); } catch { /* ignore */ }
+            const raw = phoneInput.value;
+            const cleaned = sanitizePhone(raw);
+            if (cleaned === raw) return;
+
+            const pos = phoneInput.selectionStart ?? raw.length;
+            const digitsBefore = raw.slice(0, pos).replace(/\D/g, '').length;
+            phoneInput.value = cleaned;
+
+            // Move caret to the position after `digitsBefore` digits in `cleaned`.
+            let newPos = 0, seen = 0;
+            while (newPos < cleaned.length && seen < digitsBefore) {
+                if (/\d/.test(cleaned[newPos])) seen++;
+                newPos++;
             }
+            try { phoneInput.setSelectionRange(newPos, newPos); } catch { /* ignore */ }
         });
 
-        /* ---------- Enter to submit ---------- */
+        /* ============================================================
+           ENTER TO SUBMIT
+           ============================================================ */
         [phoneInput, secretInput].forEach(el => {
             el.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') {
@@ -614,7 +688,9 @@
             });
         });
 
-        /* ---------- On load: prefill last number if any ---------- */
+        /* ============================================================
+           PREFILL LAST NUMBER
+           ============================================================ */
         (function prefill() {
             try {
                 const raw = localStorage.getItem(STORAGE_KEY);
