@@ -15,7 +15,12 @@ console.error = (...args) => {
 };
 
 const makeWASocket = require("@whiskeysockets/baileys").default;
-const { Browsers, makeCacheableSignalKeyStore, fetchLatestWaWebVersion, DisconnectReason } = require("@whiskeysockets/baileys");
+const {
+    Browsers,
+    makeCacheableSignalKeyStore,
+    fetchLatestWaWebVersion,
+    DisconnectReason
+} = require("@whiskeysockets/baileys");
 const { MongoClient } = require("mongodb");
 const { useMongoDBAuthState } = require("./lib/mongoAuthState");
 const pino = require("pino");
@@ -26,7 +31,7 @@ const https = require("https");
 const http = require("http");
 const fs = require("fs");
 
-// Try to load Mongoose (if you have database models)
+// Try to load Mongoose (optional — dashboard features limited if absent)
 let mongoose;
 try {
     mongoose = require("mongoose");
@@ -36,7 +41,7 @@ try {
     console.log(chalk.yellow("⚠️ Mongoose or database models not found. Dashboard features limited."));
 }
 
-// Cache handler / presenter resolution once (avoids fs.existsSync per message)
+// Cache message handler resolution once (avoids fs.existsSync per message)
 let _messageHandler = null;
 let _messageHandlerResolved = false;
 function getMessageHandler() {
@@ -56,7 +61,7 @@ function getMessageHandler() {
 }
 
 // ============================================================
-//   WHATSAPP CONNECTION STRINGS
+//   WHATSAPP CONNECTION CONFIG
 // ============================================================
 const WA = {
     DB_URI: process.env.MONGO_URI,
@@ -86,6 +91,9 @@ if (!WA.DB_URI) {
     console.error(chalk.red("❌ FATAL: MONGO_URI is missing from .env file!"));
     process.exit(1);
 }
+
+// Optional pairing password (enables 401 gate on /api/pair)
+const PAIR_SECRET = process.env.PAIR_SECRET || "";
 
 // ============================================================
 //   GLOBAL STATE
@@ -126,7 +134,9 @@ async function initMongo() {
     }
 
     if (mongoose && mongoose.connection.readyState === 0) {
-        await mongoose.connect(WA.DB_URI, { dbName: WA.DB_NAME }).catch(e => console.error("Mongoose error:", e.message));
+        await mongoose
+            .connect(WA.DB_URI, { dbName: WA.DB_NAME })
+            .catch(e => console.error("Mongoose error:", e.message));
     }
 
     return global.mongoClient.db(WA.DB_NAME).collection(WA.AUTH_COLLECTION);
@@ -172,21 +182,22 @@ async function captureIncomingMedia(conn, msg, sessionId) {
         let guard = 0;
         while (guard++ < 5) {
             if (inner.ephemeralMessage?.message) { inner = inner.ephemeralMessage.message; continue; }
-            if (inner.viewOnceMessage?.message)  { inner = inner.viewOnceMessage.message; continue; }
+            if (inner.viewOnceMessage?.message) { inner = inner.viewOnceMessage.message; continue; }
             if (inner.viewOnceMessageV2?.message) { inner = inner.viewOnceMessageV2.message; continue; }
-            if (inner.editedMessage?.message)    { inner = inner.editedMessage.message; continue; }
+            if (inner.editedMessage?.message) { inner = inner.editedMessage.message; continue; }
             break;
         }
 
-        // FIX: pick first non-infrastructure key instead of blindly [0]
+        // Pick first non-infrastructure key (not blind [0])
         const type = Object.keys(inner).find(k => !SKIP_CAPTURE_TYPES.has(k));
         if (!type) return;
 
-        let text = inner.conversation
-            || inner.extendedTextMessage?.text
-            || inner.imageMessage?.caption
-            || inner.videoMessage?.caption
-            || "";
+        const text =
+            inner.conversation ||
+            inner.extendedTextMessage?.text ||
+            inner.imageMessage?.caption ||
+            inner.videoMessage?.caption ||
+            "";
 
         await global.models.LiveEvent.create({
             sessionId,
@@ -219,7 +230,7 @@ async function bootSocket(sessionId, session) {
             try {
                 session.conn.ev.removeAllListeners();
                 session.conn.ws?.close();
-            } catch {}
+            } catch { /* ignore */ }
             session.conn = null;
             session.socketReady = false;
         }
@@ -227,7 +238,7 @@ async function bootSocket(sessionId, session) {
         const collection = await initMongo();
         const { state, saveCreds } = await useMongoDBAuthState(collection, sessionId);
 
-        // FIX: fetchLatestWaWebVersion returns array in 6.x, object in some builds
+        // fetchLatestWaWebVersion returns array in Baileys 6.x, object in some builds
         let version = FALLBACK_WA_VERSION;
         try {
             const result = await fetchLatestWaWebVersion();
@@ -275,7 +286,7 @@ async function bootSocket(sessionId, session) {
                         { $set: { value: { jid: conn.user?.id, linkedAt: Date.now() } } },
                         { upsert: true }
                     );
-                } catch {}
+                } catch { /* ignore */ }
 
                 if (global.models?.SessionSettings) {
                     try {
@@ -308,7 +319,7 @@ async function bootSocket(sessionId, session) {
                     return;
                 }
                 if (code === 440) {
-                    console.log(chalk.yellow(`⚠️ [${sessionId}] Conflict (440) — another instance is using this session.`));
+                    console.log(chalk.yellow(`⚠️ [${sessionId}] Conflict (440) — another instance using this session.`));
                     global.sessions.delete(sessionId);
                     return;
                 }
@@ -316,21 +327,23 @@ async function bootSocket(sessionId, session) {
                 setTimeout(() => {
                     if (!global.sessions.has(sessionId)) return;
                     if (session._paused) return;
-                    bootSocket(sessionId, session).catch(e => console.error(`Reconnect ${sessionId}:`, e.message));
+                    bootSocket(sessionId, session).catch(e =>
+                        console.error(`Reconnect ${sessionId}:`, e.message)
+                    );
                 }, WA.RECONNECT_DELAY_MS);
             }
         });
 
         conn.ev.on("messages.upsert", async (m) => {
             try {
-                // FIX: iterate all messages, not just [0]
+                // Iterate all messages, not just [0]
                 for (const msg of m.messages || []) {
                     if (!msg.key?.fromMe) {
                         await captureIncomingMedia(conn, msg, sessionId);
                     }
                 }
 
-                // FIX: cached handler lookup instead of fs.existsSync per message
+                // Cached handler lookup
                 const handler = getMessageHandler();
                 if (handler) {
                     await handler(conn, m, sessionId);
@@ -357,7 +370,11 @@ async function requestPairingCodeForSession(sessionId, phoneNumber) {
 
         let session = global.sessions.get(sessionId);
         if (session?.conn?.user) throw new Error("Session already paired");
-        if (session?.pairing && session.pairingNumber === phoneNumber) return session.pairing;
+
+        // Reuse previously-issued code if same number and still fresh
+        if (session?.pairing && session.pairingNumber === phoneNumber) {
+            return session.pairing;
+        }
 
         if (!session) {
             if (global.sessions.size >= WA.MAX_SESSIONS) {
@@ -410,17 +427,21 @@ async function logoutSession(sessionId) {
             s._paused = true;
             s.conn?.ev.removeAllListeners();
             s.conn?.ws?.close();
-        } catch {}
+        } catch { /* ignore */ }
         global.sessions.delete(sessionId);
     }
-    // FIX: cleanup cooldown/bootlock maps
+
+    // Cleanup cooldown/bootlock maps
     global.__pairCooldown.delete(sessionId);
     global.__bootLocks.delete(sessionId);
+
     try {
         const collection = await initMongo();
         const safeId = escapeRegex(sessionId);
         await collection.deleteMany({ _id: { $regex: `^${safeId}:` } });
-    } catch {}
+    } catch (e) {
+        console.error(`logoutSession(${sessionId}) mongo cleanup:`, e.message);
+    }
 }
 
 // ============================================================
@@ -456,15 +477,15 @@ async function resumeAllSessions() {
 }
 
 // ============================================================
-//   EXPRESS SERVER SETUP
+//   EXPRESS SERVER
 // ============================================================
 const app = express();
 app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, "public")));
 app.use("/Assets", express.static(path.join(__dirname, "Assets")));
 
-// Health Check
+// Health check
 app.get("/health", (_req, res) => {
     res.json({ ok: true, sessions: global.sessions.size, uptime: process.uptime() });
 });
@@ -472,7 +493,11 @@ app.get("/health", (_req, res) => {
 app.get("/api/status", (_req, res) => {
     let active = 0;
     for (const [, s] of global.sessions) if (s.conn?.user) active++;
-    res.json({ connected: active > 0, sessions: global.sessions.size, maxSessions: WA.MAX_SESSIONS });
+    res.json({
+        connected: active > 0,
+        sessions: global.sessions.size,
+        maxSessions: WA.MAX_SESSIONS
+    });
 });
 
 app.get("/api/stats", async (_req, res) => {
@@ -483,22 +508,43 @@ app.get("/api/stats", async (_req, res) => {
         }
         let active = 0;
         for (const [, s] of global.sessions) if (s.conn?.user) active++;
-        res.json({ accounts: users, totalSessions: global.sessions.size, activeSessions: active });
+        res.json({
+            accounts: users,
+            totalSessions: global.sessions.size,
+            activeSessions: active
+        });
     } catch (e) {
         console.error("stats error:", e.message);
-        res.json({ accounts: 0, totalSessions: global.sessions.size, activeSessions: 0 });
+        res.json({
+            accounts: 0,
+            totalSessions: global.sessions.size,
+            activeSessions: 0
+        });
     }
 });
 
-// FIX: rate-limit /pair using __pairCooldown
+// ============================================================
+//   /api/pair — request pairing code (rate-limited + optional secret)
+// ============================================================
 app.post(["/api/pair", "/pair"], async (req, res) => {
-    const sessionId = String(req.body?.sessionId || "sess_" + Math.random().toString(36).slice(2, 8)).trim();
+    // 401 gate if PAIR_SECRET is configured
+    if (PAIR_SECRET) {
+        const provided = req.get("x-pair-secret") || req.body?.secret || "";
+        if (provided !== PAIR_SECRET) {
+            return res.status(401).json({ error: "Invalid pairing password" });
+        }
+    }
+
+    const sessionId = String(
+        req.body?.sessionId || "sess_" + Math.random().toString(36).slice(2, 8)
+    ).trim();
     const num = String(req.body?.num || "").replace(/\D/g, "");
 
     if (!num || num.length < 10 || num.length > 15) {
         return res.status(400).json({ error: "Invalid phone number" });
     }
 
+    // 60s cooldown per phone number
     const now = Date.now();
     const last = global.__pairCooldown.get(num) || 0;
     if (now - last < WA.PAIR_COOLDOWN_MS) {
@@ -521,15 +567,49 @@ app.post(["/api/pair", "/pair"], async (req, res) => {
         res.json({ success: true, sessionId, code });
     } catch (error) {
         console.error(error);
+        // Release cooldown on failure so user can retry immediately
+        if (global.__pairCooldown.get(num) === now) {
+            global.__pairCooldown.delete(num);
+        }
         res.status(500).json({ error: error.message });
     }
 });
 
 // ============================================================
-//   LAUNCH SERVER
+//   /api/logout — revoke session
+// ============================================================
+app.post(["/api/logout", "/logout"], async (req, res) => {
+    // Same optional secret gate
+    if (PAIR_SECRET) {
+        const provided = req.get("x-pair-secret") || req.body?.secret || "";
+        if (provided !== PAIR_SECRET) {
+            return res.status(401).json({ error: "Invalid pairing password" });
+        }
+    }
+
+    const sessionId = String(req.body?.sessionId || "").trim();
+    if (!sessionId) return res.status(400).json({ error: "sessionId required" });
+
+    try {
+        await logoutSession(sessionId);
+        res.json({ success: true });
+    } catch (e) {
+        console.error("logout error:", e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Global JSON error handler (avoids express default HTML error pages)
+app.use((err, _req, res, _next) => {
+    console.error("Unhandled express error:", err);
+    res.status(500).json({ error: "Internal server error" });
+});
+
+// ============================================================
+//   LAUNCH
 // ============================================================
 const PORT = process.env.PORT || 3000;
-const server = app.listen(PORT, '0.0.0.0', async () => {
+const server = app.listen(PORT, "0.0.0.0", async () => {
     console.log(chalk.cyan(`[+] Web Dashboard running on port ${PORT}`));
 
     try {
@@ -549,14 +629,14 @@ let keepAliveInterval = null;
 
 if (process.env.BASE_URL || process.env.HEROKU_APP_NAME) {
     const selfUrl = process.env.BASE_URL || `https://${appName}.herokuapp.com`;
-    const client = selfUrl.startsWith('https:') ? https : http;
+    const client = selfUrl.startsWith("https:") ? https : http;
 
     keepAliveInterval = setInterval(() => {
         const req = client.get(`${selfUrl}/health`, (res) => {
-            res.on('data', () => {});
-            res.on('end', () => {});
+            res.on("data", () => {});
+            res.on("end", () => {});
         });
-        req.on('error', () => {});
+        req.on("error", () => {});
         req.setTimeout(15000, () => req.destroy());
     }, 10 * 60 * 1000);
 }
@@ -569,11 +649,19 @@ async function shutdown(signal) {
     }
     await new Promise(r => server.close(r));
     for (const [, sess] of global.sessions) {
-        try { sess.conn?.end(undefined); } catch {}
+        try { sess.conn?.end(undefined); } catch { /* ignore */ }
     }
-    try { await global.mongoClient?.close(); } catch {}
+    try { await global.mongoClient?.close(); } catch { /* ignore */ }
     if (mongoose) await mongoose.disconnect().catch(() => {});
     process.exit(0);
 }
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
+
+// Catch-all for unhandled rejections (prevents silent crashes)
+process.on("unhandledRejection", (reason) => {
+    console.error(chalk.red("Unhandled rejection:"), reason);
+});
+process.on("uncaughtException", (err) => {
+    console.error(chalk.red("Uncaught exception:"), err);
+});
